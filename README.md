@@ -4,8 +4,10 @@ Claude Code status line with live **session workflow phase** context. The status
 shows what phase the session is in (`Plan:`, `Exec:`, `Verify:`, …) and its subject,
 color-coded, updated by the model itself as the work progresses.
 
+![status line showing the session phase](assets/statusline.png)
+
 ```
-haiku | ~/pr26 | 7m | Exec: DB User Schema migration | ...
+Fable 5 · high | daily-status | master | +315-50 | $20.86 | 178m | Done: daily-status project extracted
 ```
 
 ## Files
