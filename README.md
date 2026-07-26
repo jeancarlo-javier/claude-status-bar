@@ -67,7 +67,7 @@ Canonical labels are English. Semantic palette (256-color):
 | `Focus:` | 213 pink | daily focus |
 | `Needs-Review:` | 226 bright yellow | **waiting on the user** |
 
-Subject text renders in light blue (117); lines truncate at 48 chars.
+Only the phase label is colored — the subject renders plain. Lines truncate at 48 chars.
 
 ## What the two lines show
 
