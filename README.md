@@ -26,6 +26,20 @@ shared across all Claude config dirs (the scripts always resolve `~/.claude/` re
 
 ## Install
 
+```bash
+claude plugin marketplace add jeancarlo-javier/claude-status-bar
+claude plugin install claude-status-bar@claude-status-bar
+claude -p "/claude-status-bar:init"
+```
+
+Installing the plugin wires both hooks. A plugin cannot set a `statusLine` or edit your global
+`CLAUDE.md`, so `init` does those two: it points `statusLine` at the renderer in
+`~/.claude/settings.json` and appends the phase rule to `~/.claude/CLAUDE.md`. It asks first if
+you already have a status line. Restart Claude Code afterwards.
+
+<details>
+<summary>Manual install, without the plugin system</summary>
+
 Paste this into Claude Code:
 
 ````markdown
@@ -40,6 +54,8 @@ Plus append the rule from docs/global-claude-rule.md to ~/.claude/CLAUDE.md.
 Verify it renders, then tell me to restart.
 ````
 
+</details>
+
 ## Files
 
 | File | Role |
@@ -48,6 +64,9 @@ Verify it renders, then tell me to restart.
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. Also intercepts `-hd` / `-hr` to check off or rotate the health reminder without spending a turn. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per session) if the phase file was never written — the deterministic enforcement layer. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
+| `.claude-plugin/` | Plugin and marketplace manifests, so the repo installs as a Claude Code plugin. |
+| `hooks/hooks.json` | Wires both hooks automatically when installed as a plugin. |
+| `skills/init/SKILL.md` | `/claude-status-bar:init` — the two install steps a plugin can't perform itself. |
 
 ## Phases and colors
 

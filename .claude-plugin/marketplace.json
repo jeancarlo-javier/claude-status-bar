@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-status-bar",
+  "description": "Status line showing the session's live workflow phase, plus the usual session context",
+  "owner": {
+    "name": "Jeancarlo Javier",
+    "url": "https://github.com/jeancarlo-javier"
+  },
+  "plugins": [
+    {
+      "name": "claude-status-bar",
+      "description": "Two-line status line whose headline feature is the session's live workflow phase (Plan, Exec, Verify, Done), rewritten by the model itself at each transition",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
