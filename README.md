@@ -1,4 +1,4 @@
-# daily-status
+# claude-status-bar
 
 Claude Code status line with live **session workflow phase** context. The status line
 shows what phase the session is in (`Plan:`, `Exec:`, `Verify:`, …) and its subject,
@@ -7,7 +7,7 @@ color-coded, updated by the model itself as the work progresses.
 ![status line showing the session phase](assets/statusline.png)
 
 ```
-Fable 5 · high | daily-status | master | +315-50 | $20.86 | 178m | Done: daily-status project extracted
+Fable 5 · high | claude-status-bar | master | +315-50 | $20.86 | 178m | Done: repo rename
 ```
 
 ## Files
@@ -60,10 +60,10 @@ for backwards compat):
 
 ```jsonc
 // statusLine
-"statusLine": { "type": "command", "command": "node \"~/pr26/daily-status/hooks/claude-code-zhul-bar.js\"", "refreshInterval": 5 }
+"statusLine": { "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/claude-code-zhul-bar.js\"", "refreshInterval": 5 }
 // hooks
-"Stop":             [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/daily-status/hooks/session-context-guard.js\"", "timeout": 5 }] }],
-"UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/daily-status/hooks/session-context-nudge.js\"", "timeout": 5 }] }]
+"Stop":             [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/session-context-guard.js\"", "timeout": 5 }] }],
+"UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/session-context-nudge.js\"", "timeout": 5 }] }]
 ```
 
 Currently wired: `~/.claude/settings.json` (covers `claude` and `cs`; `cm` inherits it —
