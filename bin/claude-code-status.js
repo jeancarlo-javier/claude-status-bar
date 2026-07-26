@@ -198,7 +198,10 @@ process.stdin.on('end', () => {
     const sessionCtx = (() => {
       if (!session) return '';
       try {
-        let t = fs.readFileSync(path.join(os.homedir(), '.claude', 'session-context', session), 'utf8').trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '');
+        const buf = fs.readFileSync(path.join(os.homedir(), '.claude', 'session-context', session));
+        // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
+        let t = (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
+          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
         if (t.length > 48) t = t.slice(0, 46) + '..';
         // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
         const PHASE = { research: 176, plan: 111, 'review-plan': 141, exec: 220, 'q&a': 208, review: 208, 'review-execution': 208, verify: 80, done: 114, debug: 203, fix: 203, focus: 213,
