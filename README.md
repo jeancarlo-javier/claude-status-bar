@@ -1,5 +1,8 @@
 # claude-status-bar
 
+[![release](https://img.shields.io/github/v/release/jeancarlo-javier/claude-status-bar)](https://github.com/jeancarlo-javier/claude-status-bar/releases)
+[![license](https://img.shields.io/github/license/jeancarlo-javier/claude-status-bar)](LICENSE)
+
 Claude Code status line with live **session workflow phase** context. The status line
 shows what phase the session is in (`Plan:`, `Exec:`, `Verify:`, …) and its subject,
 color-coded, updated by the model itself as the work progresses.
