@@ -104,7 +104,7 @@ Only the phase label is colored — the subject renders plain. Lines truncate at
 
 ```
 Fable 5 · xhigh | claude-status-bar · master | +1-1 | $3.12 | 14m | Done: All checks green
-ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d) | health: ☐ 💧 drink water
+ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d) | health: ☐ 💧 drink water (send '-hd')
 ```
 
 | Line | Shows |
@@ -112,14 +112,19 @@ ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk �
 | 1 | active to-do, model · reasoning effort, project · git branch (`↑↓` vs upstream), lines added/removed, session cost, elapsed minutes, **phase: subject** |
 | 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns, health nudge with today's tally |
 
-Every segment is optional — it only renders when Claude Code supplies the data (no upstream
-branch, no `↑↓`; no rate-limit payload, no bars; no in-progress to-do, no task label).
+Every segment except health is optional — the others only render when Claude Code
+supplies the data (no upstream branch, no `↑↓`; no rate-limit payload, no bars; no
+in-progress to-do, no task label).
 
-Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
-while you're idle. Each one renders its own hint — `☐ 💧 drink water (send '-hd')`. Send
-`-hd` as your whole next prompt and the nudge hook intercepts it and ends the turn, so the
-ack reaches no model and costs no tokens.
-`bin/claude-code-status.js done` does the same from a shell.
+The health segment is always on: a dim ✓ when nothing is due, a bright
+`☐ 💧 drink water (send '-hd')` when something is, with the backlog queued after it
+(`→ 🚶`) and today's tally (`· 👀 3`). Reminders stay put until you ack them — send `-hd`
+as your whole next prompt, or run `bin/claude-code-status.js done`; a break of more than
+90 minutes across all sessions clears the slate. Sunlight is the one exception: it only
+prompts between 10:00 and 17:00. Every session reads the same state: bars rendering at
+the same moment show byte-identical health segments, and after an ack each bar converges
+on its next refresh (there is no push channel — a bar that hasn't re-rendered yet shows
+the previous state until it does).
 
 ## Token budget (measured)
 
@@ -138,9 +143,12 @@ Typical session: 300–800 tokens total.
 - **No network, no dependencies.** The three scripts require `fs`, `os`, `path`,
   `child_process` — nothing else. No HTTP, no telemetry, no analytics.
 - **Reads:** your phase file, `~/.claude/todos/` (the active task label),
-  `~/.claude/health-reminders.json`, and two read-only `git` commands in the current repo.
-- **Writes:** `~/.claude/health-reminders.json`. The phase file itself is written by the
-  model's own `echo`, not by this tool.
+  `~/.claude/health-reminders.json` and its `.activity` sidecar, and two read-only
+  `git` commands in the current repo.
+- **Writes:** `~/.claude/health-reminders.json` (only when you ack, plus a one-time
+  seed) and `~/.claude/health-reminders.json.activity` (a single timestamp — the
+  idle-reset boundary; its mtime doubles as "a bar rendered recently"). The phase
+  file itself is written by the model's own `echo`, not by this tool.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes
   up to 120 chars of it back to the model — so the subject reaches the API as part of your
   next prompt, exactly like anything you type.

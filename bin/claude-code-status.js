@@ -8,9 +8,10 @@ const os = require('os');
 const { execSync } = require('child_process');
 
 const HEALTH_STATE_PATH = path.join(os.homedir(), '.claude', 'health-reminders.json');
-const HEALTH_DISPLAY_MS = 5 * 60_000;          // 5 min stable window
+const HEALTH_ACTIVITY_PATH = HEALTH_STATE_PATH + '.activity'; // mtime = a bar rendered; content = last resume boundary
 const HEALTH_IDLE_MS = 90 * 60_000;
-const HEALTH_GAP_MS = 10 * 60_000;             // min quiet time between consecutive reminders
+const HEALTH_ACK_FLASH_MS = 60_000;
+const HEALTH_TOUCH_MS = 60_000;
 // as a prompt; the UserPromptSubmit hook checks the reminder off. \x1b[39m = default fg, then back to the segment's cyan
 const ACK_HINT = " \x1b[39m(send '-hd')\x1b[36m";
 const HEALTH_REMINDERS = {
@@ -20,106 +21,169 @@ const HEALTH_REMINDERS = {
   sunlight: { icon: '☀️', interval: 180 * 60_000, hours: [10, 17], phrases: ['get some sunlight', 'step outside 5 min'] },
 };
 
-const readHealthState = () => {
-  try {
-    const s = JSON.parse(fs.readFileSync(HEALTH_STATE_PATH, 'utf8'));
-    if (s.version !== 1) throw new Error('version');
-    return s;
-  } catch {
-    const now = Date.now();
-    return { version: 1, startedAt: now, lastActivityAt: now,
-             lastShown: { eyes: now, water: now, movement: now }, current: null };
+const atomicWrite = (file, str) => {
+  const tmp = `${file}.${process.pid}.tmp`; // pid-scoped: concurrent writers can't interleave
+  fs.writeFileSync(tmp, str);
+  fs.renameSync(tmp, file);
+};
+const writeHealthState = (s) => atomicWrite(HEALTH_STATE_PATH, JSON.stringify(s));
+
+// one normalizer for v1, v2, partial, hand-edited, and corrupt-with-mtime-baseline reads.
+// `now` is injected so fixed-clock tests are deterministic; callers on the render/ack path
+// thread their own `now` through. Post-condition (precondition: finite `now`; ANY `base`):
+// startedAt finite ≤ now; lastDone has all 4 categories finite; done and every done[day]
+// are NON-ARRAY objects holding only finite counts > 0; lastAckAt finite (else 0).
+// deriveHealth/ackDone rely on exactly this.
+const normalizeState = (raw, base, now = Date.now()) => {
+  const src = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : {}; // [] passes typeof-object
+  if (!Number.isFinite(base)) base = now; // R3-1: a NaN/±Infinity baseline must never become startedAt
+  let startedAt = Number(src.startedAt);
+  if (!Number.isFinite(startedAt) || startedAt > now) startedAt = Math.min(base, now); // future mtime never becomes startedAt
+  const from = (src.version === 2 ? src.lastDone : src.lastShown) || {}; // v1 lastShown ≈ last satisfied
+  const lastDone = {};
+  for (const cat of Object.keys(HEALTH_REMINDERS)) {
+    const t = Number(from[cat]);
+    lastDone[cat] = Number.isFinite(t) ? t : startedAt; // v1 files lack sunlight → seeded here
   }
+  const done = {};
+  if (src.done && typeof src.done === 'object' && !Array.isArray(src.done))
+    for (const [day, rec] of Object.entries(src.done)) {
+      if (!rec || typeof rec !== 'object' || Array.isArray(rec)) continue; // JSON.stringify([]) drops keys → tally would vanish
+      const clean = {};
+      for (const [c, v] of Object.entries(rec)) { const k = Number(v); if (Number.isFinite(k) && k > 0) clean[c] = k; }
+      if (Object.keys(clean).length) done[day] = clean;
+    }
+  const ack = Number(src.lastAckAt);
+  return { version: 2, startedAt, lastDone, done,
+           lastAckAt: Number.isFinite(ack) ? ack : 0, // Infinity must not pin ✅ forever
+           legacyActivityAt: Number(src.lastActivityAt) || 0 }; // transient: seeds a missing sidecar; never persisted
 };
 
-const writeHealthState = (s) => {
-  const tmp = `${HEALTH_STATE_PATH}.${process.pid}.tmp`; // pid-scoped: concurrent renders can't interleave
-  fs.writeFileSync(tmp, JSON.stringify(s));
-  fs.renameSync(tmp, HEALTH_STATE_PATH);
+const readHealthState = (now = Date.now(), retried) => {
+  let mt = 0; try { mt = fs.statSync(HEALTH_STATE_PATH).mtimeMs; } catch {}
+  let bytes;
+  try { bytes = fs.readFileSync(HEALTH_STATE_PATH, 'utf8'); }
+  catch (e) {
+    if (e.code !== 'ENOENT')
+      // case UNREADABLE (EACCES, EISDIR, …): the file may be weeks of valid history we just
+      // can't see. In-memory state seeded at now; `unreadable` makes ackDone refuse to write
+      // over it. NOT the mtime baseline — no fabricated due reminders.
+      return { ...normalizeState({ startedAt: now }, now, now), unreadable: true };
+    // case MISSING (ENOENT): seed exactly once
+    if (!retried) {
+      try { fs.writeFileSync(HEALTH_STATE_PATH, JSON.stringify({ version: 2, startedAt: now,
+            lastDone: { eyes: now, water: now, movement: now, sunlight: now }, lastAckAt: 0, done: {} }),
+            { flag: 'wx' }); }
+      catch (e2) { if (e2.code === 'EEXIST') return readHealthState(now, true); } // loser re-reads: SAME normalizer, SAME now
+    }
+    return normalizeState({ startedAt: now }, now, now); // read-only FS degrades to permanent dim ✓
+  }
+  // bytes read OK from here on — a throw below is CORRUPT JSON, not an I/O failure
+  try { return normalizeState(JSON.parse(bytes), mt || now, now); } // Part B: normalizeState owns shape checks
+  catch { return normalizeState({}, mt || now, now); } // case CORRUPT: mtime is a STABLE baseline — reminders
+                                                       // still become due; the next ack atomically repairs the file
 };
 
-// overdue categories waiting behind the shown one, most-overdue first
-const pendingIcons = (s, now, except) => {
-  const q = Object.entries(HEALTH_REMINDERS)
+// due categories, most-overdue first — deterministic for a given (state, now, resumeAt)
+const dueList = (s, now, resumeAt) => {
+  const last = (cat) => Math.min(now, Math.max(s.lastDone[cat], resumeAt)); // clock-skew clamp; normalizer guarantees the key
+  return Object.entries(HEALTH_REMINDERS)
     .filter(([cat, cfg]) => {
-      if (cat === except) return false;
       if (cfg.hours) { const h = new Date(now).getHours(); if (h < cfg.hours[0] || h >= cfg.hours[1]) return false; }
-      return s.lastShown[cat] <= now && now - s.lastShown[cat] >= cfg.interval;
+      return now - last(cat) >= cfg.interval;
     })
-    .sort((a, b) => (now - s.lastShown[b[0]] - b[1].interval) - (now - s.lastShown[a[0]] - a[1].interval))
-    .map(([, cfg]) => cfg.icon).join('');
-  return q ? ' → ' + q : '';
+    .sort((a, b) => (now - last(b[0]) - b[1].interval) - (now - last(a[0]) - a[1].interval))
+    .map(([cat]) => cat);
+};
+
+const sidecarSeed = (s, now) => s.legacyActivityAt
+  ? (now - s.legacyActivityAt > HEALTH_IDLE_MS ? now : 0) // v1 upgrade: honor the legacy idle gap
+  : now; // v2/fresh/corrupt: a missing sidecar must not resurrect a cleared queue
+
+// ponytail: sidecar = liveness (mtime) + resume boundary (content); every failure degrades to
+// "no reset this render" and repairs next render — never throws; one bounded retry, no loop
+const activityResume = (now, seed, retried) => {
+  let st, raw;
+  try { st = fs.statSync(HEALTH_ACTIVITY_PATH); raw = fs.readFileSync(HEALTH_ACTIVITY_PATH, 'utf8'); }
+  catch {
+    if (retried) return seed; // second read failure: give up for this render
+    try { fs.writeFileSync(HEALTH_ACTIVITY_PATH, String(seed), { flag: 'wx' }); return seed; } // exactly-once seed
+    catch (e) {
+      if (e.code === 'EEXIST') return activityResume(now, seed, true); // a wx winner may expose the entry before its
+                                                                       // write lands — re-read via the validation below
+      return seed; // read-only FS: no reset tracking this render
+    }
+  }
+  const r = Number(raw);
+  const bad = raw.trim() === '' || !Number.isFinite(r) || r < 0 || r > now + 60_000;
+  if (bad || now - st.mtimeMs > HEALTH_IDLE_MS) { // garbage/empty content → boundary unknown → repair to now;
+    try { atomicWrite(HEALTH_ACTIVITY_PATH, String(now)); } catch {} // idle gap → new boundary. Atomic: no truncate window
+    return now;
+  }
+  if (now - st.mtimeMs > HEALTH_TOUCH_MS) try { fs.utimesSync(HEALTH_ACTIVITY_PATH, now / 1000, now / 1000); } catch {}
+  return r;
+};
+
+// pure: any process evaluating the same (state, now, resumeAt) derives the identical string.
+// Invariant: given a normalizeState'd s, never throws, never returns '' for any finite now:
+//  - done + every done[day] are non-array objects with finite counts > 0 (normalizer);
+//    the typeof guard below is belt-and-braces only
+//  - tally filters unknown categories: HEALTH_REMINDERS[c].icon cannot throw
+//  - startedAt finite ≤ read-time now (normalizer); elapsed clamped ≥ 0 below (a render-now a
+//    few ms behind the read-now), and the phrase index is pinned to 0|1 — even a subtraction
+//    overflowing to Infinity at opposite-sign finite extremes (raw index NaN) renders
+//    phrases[0], never phrases[NaN] (R3-1)
+//  - lastAckAt finite (normalizer) → the ✅-flash comparison is well-defined
+//  - dueList only returns keys of HEALTH_REMINDERS → cfg is always defined
+const deriveHealth = (s, now, resumeAt) => {
+  const today = s.done[new Date(now).toDateString()];
+  const items = today && typeof today === 'object'
+    ? Object.entries(today).filter(([c, n]) => HEALTH_REMINDERS[c] && n > 0)
+        .map(([c, n]) => HEALTH_REMINDERS[c].icon + ' ' + n) : [];
+  const tally = items.length ? ' · ' + items.join(' ') : '';
+  const due = dueList(s, now, resumeAt);
+  if (!due.length) {
+    if (now - s.lastAckAt < HEALTH_ACK_FLASH_MS) return '✅' + tally;
+    return '\x1b[2m✓' + tally + '\x1b[22m'; // always-present idle: line 2 never reshuffles
+  }
+  const cfg = HEALTH_REMINDERS[due[0]];
+  const i = Math.floor(Math.max(0, now - s.startedAt) / cfg.interval) % 2; // NaN if elapsed overflowed to Infinity
+  const phrase = '☐ ' + cfg.icon + ' ' + cfg.phrases[i === 1 ? 1 : 0];     // R3-1: index pinned to 0|1
+  const q = due.slice(1).map(c => HEALTH_REMINDERS[c].icon).join('');
+  return phrase + ACK_HINT + (q ? ' → ' + q : '') + tally;
 };
 
 const selectHealthPhrase = (now) => {
-  try {
-    const s = readHealthState();
-    const today = s.done?.[new Date().toDateString()];
-    const tally = today ? ' · ' + Object.entries(today).map(([c, n]) => HEALTH_REMINDERS[c].icon + ' ' + n).join(' ') : '';
-    if (s.current && now < s.current.expiresAt) {
-      if (!(s.current.renders >= 2)) { s.current.renders = 2; writeHealthState(s); }
-      return s.current.phrase + (s.current.acked ? '' : ACK_HINT) + pendingIcons(s, now, s.current.category) + tally;
-    }
-    if (now - s.lastActivityAt > HEALTH_IDLE_MS) {
-      Object.keys(s.lastShown).forEach(k => s.lastShown[k] = now);
-      s.current = null;
-    }
-    if (s.current) { // window over: count as delivered only if rendered 2+ times, else stays overdue and re-fires
-      if (s.current.renders >= 2) s.lastShown[s.current.category] = s.current.dueAt;
-      if (!s.current.acked) s.lastEndedAt = s.current.expiresAt; // acked → no cooldown, queued reminder shows right after the ✅
-      s.current = null;
-    }
-    if (s.lastEndedAt > now) s.lastEndedAt = now; // clock skew clamp
-    if (now - (s.lastEndedAt || 0) < HEALTH_GAP_MS) { // cooldown: no back-to-back reminders
-      s.lastActivityAt = now;
-      writeHealthState(s);
-      return null;
-    }
-    let best = null, bestOver = 0;
-    for (const [cat, cfg] of Object.entries(HEALTH_REMINDERS)) {
-      if (cfg.hours) { const h = new Date(now).getHours(); if (h < cfg.hours[0] || h >= cfg.hours[1]) continue; }
-      if (!(s.lastShown[cat] <= now)) s.lastShown[cat] = now; // clock skew / corrupt → clamp
-      const over = (now - s.lastShown[cat]) - cfg.interval;
-      if (over > bestOver) { bestOver = over; best = cat; }
-    }
-    s.lastActivityAt = now;
-    if (!best) { s.current = null; writeHealthState(s); return null; }
-    const phrase = '☐ ' + HEALTH_REMINDERS[best].icon + ' ' + HEALTH_REMINDERS[best].phrases[
-      Math.floor((now - s.startedAt) / HEALTH_REMINDERS[best].interval) % 2
-    ];
-    s.current = { category: best, phrase, dueAt: now, expiresAt: now + HEALTH_DISPLAY_MS, renders: 1 };
-    writeHealthState(s);
-    return phrase + ACK_HINT + pendingIcons(s, now, best) + tally;
-  } catch { return null; } // status line never breaks on health-state I/O
+  // ponytail: renders never write the JSON — acks are the only writers, so a stale render
+  // cannot clobber a concurrent ack; upgrade path: lockfile, if a second writer ever appears
+  try { const s = readHealthState(now); return deriveHealth(s, now, activityResume(now, sidecarSeed(s, now))); }
+  catch { return '\x1b[2m✓\x1b[22m'; } // last resort: the segment is still present
 };
 
-// `claude-code-status done` — check off the active health reminder (statusline itself is not clickable)
-if (process.argv[2] === 'done') {
+// `claude-code-status done` — check off what every bar is showing (top of the due list)
+const ackDone = (now) => {
   try {
-    const s = readHealthState();
-    const now = Date.now();
-    if (s.current && !s.current.acked) {
-      const cat = s.current.category;
-      s.lastShown[cat] = now;
-      const day = new Date().toDateString();
-      s.done = s.done || {};
-      s.done[day] = s.done[day] || {};
-      s.done[day][cat] = (s.done[day][cat] || 0) + 1;
-      if (pendingIcons(s, now, cat)) { // queue not empty → skip ✅, next reminder fires on next render
-        s.current = null;
-        s.lastEndedAt = 0;
-      } else {
-        s.current = { category: cat, phrase: '✅', dueAt: now,
-                      expiresAt: now + 60_000, renders: 2, acked: true };
-      }
-      writeHealthState(s);
-      console.log(`✅ ${HEALTH_REMINDERS[cat].icon} done (${s.done[day][cat]} today)`);
-    } else {
-      console.log('no active health reminder');
-    }
-  } catch (e) { console.log('could not update health state'); }
-  process.exit(0);
-}
+    const s = readHealthState(now);
+    if (s.unreadable) return 'could not update health state'; // never overwrite a state file we couldn't read (R2-2)
+    const cat = dueList(s, now, activityResume(now, sidecarSeed(s, now)))[0];
+    if (!cat) return 'no active health reminder';
+    s.lastDone[cat] = now;                        // safe: normalizer guarantees lastDone object
+    const day = new Date(now).toDateString();
+    if (!s.done[day]) s.done[day] = {};           // normalizer guarantees existing day entries are clean non-array objects
+    const n = Number(s.done[day][cat]);
+    s.done[day][cat] = (Number.isFinite(n) && n > 0 ? n : 0) + 1; // malformed/negative resets to 0 — never -2 → -1
+    // ponytail: two simultaneous acks can lose one tally; per-category files if that ever matters
+    writeHealthState({ version: 2, startedAt: s.startedAt, lastDone: s.lastDone, lastAckAt: now, done: s.done });
+    return `✅ ${HEALTH_REMINDERS[cat].icon} done (${s.done[day][cat]} today)`;
+  } catch { return 'could not update health state'; }
+};
+
+module.exports = { normalizeState, dueList, deriveHealth, activityResume, HEALTH_REMINDERS }; // pure helpers,
+// plus activityResume so test 15 can force its EEXIST-loser path deterministically in-process (R3-2);
+// the remaining impure paths (selectHealthPhrase, ackDone, readHealthState) are exercised via the CLI
+if (require.main !== module) return; // required as a module (tests): skip argv/stdin below
+
+if (process.argv[2] === 'done') { console.log(ackDone(Date.now())); process.exit(0); }
 
 let input = '';
 process.stdin.setEncoding('utf8');
