@@ -38,12 +38,20 @@ const writeHealthState = (s) => {
   fs.renameSync(tmp, HEALTH_STATE_PATH);
 };
 
+const inHours = (cfg, now) => { // daylight-only categories
+  if (!cfg.hours) return true;
+  const h = new Date(now).getHours();
+  return h >= cfg.hours[0] && h < cfg.hours[1];
+};
+
+const phraseFor = (cat, s, now) => '☐ ' + HEALTH_REMINDERS[cat].icon + ' ' +
+  HEALTH_REMINDERS[cat].phrases[Math.floor((now - s.startedAt) / HEALTH_REMINDERS[cat].interval) % 2];
+
 // overdue categories waiting behind the shown one, most-overdue first
 const pendingIcons = (s, now, except) => {
   const q = Object.entries(HEALTH_REMINDERS)
     .filter(([cat, cfg]) => {
-      if (cat === except) return false;
-      if (cfg.hours) { const h = new Date(now).getHours(); if (h < cfg.hours[0] || h >= cfg.hours[1]) return false; }
+      if (cat === except || !inHours(cfg, now)) return false;
       return s.lastShown[cat] <= now && now - s.lastShown[cat] >= cfg.interval;
     })
     .sort((a, b) => (now - s.lastShown[b[0]] - b[1].interval) - (now - s.lastShown[a[0]] - a[1].interval))
@@ -77,16 +85,14 @@ const selectHealthPhrase = (now) => {
     }
     let best = null, bestOver = 0;
     for (const [cat, cfg] of Object.entries(HEALTH_REMINDERS)) {
-      if (cfg.hours) { const h = new Date(now).getHours(); if (h < cfg.hours[0] || h >= cfg.hours[1]) continue; }
+      if (!inHours(cfg, now)) continue;
       if (!(s.lastShown[cat] <= now)) s.lastShown[cat] = now; // clock skew / corrupt → clamp
       const over = (now - s.lastShown[cat]) - cfg.interval;
       if (over > bestOver) { bestOver = over; best = cat; }
     }
     s.lastActivityAt = now;
     if (!best) { s.current = null; writeHealthState(s); return null; }
-    const phrase = '☐ ' + HEALTH_REMINDERS[best].icon + ' ' + HEALTH_REMINDERS[best].phrases[
-      Math.floor((now - s.startedAt) / HEALTH_REMINDERS[best].interval) % 2
-    ];
+    const phrase = phraseFor(best, s, now);
     s.current = { category: best, phrase, dueAt: now, expiresAt: now + HEALTH_DISPLAY_MS, renders: 1 };
     writeHealthState(s);
     return phrase + ACK_HINT + pendingIcons(s, now, best) + tally;
@@ -114,6 +120,27 @@ if (process.argv[2] === 'done') {
       }
       writeHealthState(s);
       console.log(`✅ ${HEALTH_REMINDERS[cat].icon} done (${s.done[day][cat]} today)`);
+    } else {
+      console.log('no active health reminder');
+    }
+  } catch (e) { console.log('could not update health state'); }
+  process.exit(0);
+}
+
+// `claude-code-status rotate` — swap the on-screen reminder for the next category; the skipped one stays due
+if (process.argv[2] === 'rotate') {
+  try {
+    const s = readHealthState();
+    const now = Date.now();
+    if (s.current && !s.current.acked) {
+      const cats = Object.keys(HEALTH_REMINDERS);
+      const i = cats.indexOf(s.current.category);
+      const next = cats.slice(i + 1).concat(cats.slice(0, i + 1)).find(c => inHours(HEALTH_REMINDERS[c], now));
+      const phrase = phraseFor(next, s, now);
+      // renders 2 → counts as delivered when the window closes, so the rotated-in category's timer restarts
+      s.current = { category: next, phrase, dueAt: now, expiresAt: now + HEALTH_DISPLAY_MS, renders: 2 };
+      writeHealthState(s);
+      console.log(`↻ ${phrase}`);
     } else {
       console.log('no active health reminder');
     }
