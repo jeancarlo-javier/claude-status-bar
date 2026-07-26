@@ -33,7 +33,7 @@ const readHealthState = () => {
 };
 
 const writeHealthState = (s) => {
-  const tmp = HEALTH_STATE_PATH + '.tmp';
+  const tmp = `${HEALTH_STATE_PATH}.${process.pid}.tmp`; // pid-scoped: concurrent renders can't interleave
   fs.writeFileSync(tmp, JSON.stringify(s));
   fs.renameSync(tmp, HEALTH_STATE_PATH);
 };
