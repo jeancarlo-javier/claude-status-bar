@@ -2,6 +2,7 @@
 
 [![release](https://img.shields.io/github/v/release/jeancarlo-javier/claude-status-bar)](https://github.com/jeancarlo-javier/claude-status-bar/releases)
 [![license](https://img.shields.io/github/license/jeancarlo-javier/claude-status-bar)](LICENSE)
+[![Listed on ClaudePluginHub](https://www.claudepluginhub.com/badge/jeancarlo-javier-claude-status-bar)](https://www.claudepluginhub.com/plugins/jeancarlo-javier-claude-status-bar?ref=badge)
 
 Two-line Claude Code status line. The headline feature: the session's live **workflow
 phase** (`Plan:`, `Exec:`, `Verify:`, …) and its subject, color-coded and rewritten by the
