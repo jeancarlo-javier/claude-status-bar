@@ -42,8 +42,10 @@ It never overwrites a status line you already have; if you have one, it says so 
 alone. `/claude-status-bar:init` switches over when you want that. Plugin updates re-point the
 path automatically.
 
-To remove: `claude plugin uninstall claude-status-bar@claude-status-bar`, then delete the marker
-block from `~/.claude/CLAUDE.md` and the `statusLine` key from `~/.claude/settings.json`.
+To remove: `claude plugin uninstall claude-status-bar@claude-status-bar`, then delete the
+`claude-status-bar:begin`/`:end` block from `~/.claude/CLAUDE.md`, and — only if it still points
+at `claude-code-status.js` — the `statusLine` key from `~/.claude/settings.json`. Also
+`rm ~/.claude/.claude-status-bar-noticed`, the flag that keeps the one-time notice from repeating.
 
 <details>
 <summary>Manual install, without the plugin system</summary>
