@@ -72,20 +72,22 @@ Subject text renders in light blue (117); lines truncate at 48 chars.
 ## What the two lines show
 
 ```
-Refactoring the parser | Fable 5 · high | claude-status-bar | master ↑2 | +315-50 | $20.86 | 178m | Exec: Statusline second line
-ctx ██████░░ 78% | 5h ████░░░░ 52% (2h14m) | wk █░░░░░░░ 23% (4d) | h: ☐ 💧 drink water · 👀 3 💧 2
+Fable 5 · xhigh | claude-status-bar · master | +1-1 | $3.12 | 14m | Done: All checks green
+ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d) | h: ☐ 💧 drink water
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | active to-do, model · reasoning effort, project, git branch with `↑↓` vs upstream, lines added/removed, session cost, elapsed minutes, **phase: subject** |
+| 1 | active to-do, model · reasoning effort, project · git branch (`↑↓` vs upstream), lines added/removed, session cost, elapsed minutes, **phase: subject** |
 | 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns, health nudge with today's tally |
 
 Every segment is optional — it only renders when Claude Code supplies the data (no upstream
-branch, no `↑↓`; no rate-limit payload, no bars).
+branch, no `↑↓`; no rate-limit payload, no bars; no in-progress to-do, no task label).
 
 Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
-while you're idle. `bin/claude-code-status.js done` checks off the active one.
+while you're idle. To check one off, send `d` as your whole next prompt — the nudge hook
+intercepts it and ends the turn, so the ack reaches no model and costs no tokens.
+`bin/claude-code-status.js done` does the same from a shell.
 
 ## Token budget (measured)
 
