@@ -14,7 +14,7 @@ Fable 5 · high | claude-status-bar | master | +315-50 | $20.86 | 178m | Done: r
 
 | File | Role |
 |------|------|
-| `hooks/claude-code-zhul-bar.js` | Status line renderer (`statusLine` command). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
+| `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per session) if the phase file was never written — the deterministic enforcement layer. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
@@ -55,12 +55,11 @@ Subject text renders in light blue (117); lines truncate at 48 chars.
 
 ## Wiring (per Claude config)
 
-Point the settings at this folder (symlinks also exist at the old `~/.claude/hooks/` paths
-for backwards compat):
+Point the settings at this folder:
 
 ```jsonc
 // statusLine
-"statusLine": { "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/claude-code-zhul-bar.js\"", "refreshInterval": 5 }
+"statusLine": { "type": "command", "command": "node \"~/pr26/claude-status-bar/bin/claude-code-status.js\"", "refreshInterval": 5 }
 // hooks
 "Stop":             [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/session-context-guard.js\"", "timeout": 5 }] }],
 "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"~/pr26/claude-status-bar/hooks/session-context-nudge.js\"", "timeout": 5 }] }]

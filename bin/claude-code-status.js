@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// claude-code-zhul-bar — Jeancarlo's Claude Code statusline
+// claude-code-status — Jeancarlo's Claude Code statusline
 // | = section, · = inline stat
 
 const fs = require('fs');
@@ -91,7 +91,7 @@ const selectHealthPhrase = (now) => {
   } catch { return null; } // status line never breaks on health-state I/O
 };
 
-// `zhul-bar done` — check off the active health reminder (statusline itself is not clickable)
+// `claude-code-status done` — check off the active health reminder (statusline itself is not clickable)
 if (process.argv[2] === 'done') {
   try {
     const s = readHealthState();
