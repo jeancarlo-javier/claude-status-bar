@@ -3,15 +3,25 @@
 [![release](https://img.shields.io/github/v/release/jeancarlo-javier/claude-status-bar)](https://github.com/jeancarlo-javier/claude-status-bar/releases)
 [![license](https://img.shields.io/github/license/jeancarlo-javier/claude-status-bar)](LICENSE)
 
-Claude Code status line with live **session workflow phase** context. The status line
-shows what phase the session is in (`Plan:`, `Exec:`, `Verify:`, …) and its subject,
-color-coded, updated by the model itself as the work progresses.
+Two-line Claude Code status line. The headline feature: the session's live **workflow
+phase** (`Plan:`, `Exec:`, `Verify:`, …) and its subject, color-coded and rewritten by the
+model itself as the work progresses. The rest is the session context you want on screen
+anyway.
 
 ![status line showing the session phase](assets/statusline.png)
 
 ```
-Fable 5 · high | claude-status-bar | master | +315-50 | $20.86 | 178m | Done: repo rename
+Refactoring the parser | Fable 5 · high | claude-status-bar | master ↑2 | +315-50 | $20.86 | 178m | Exec: Statusline second line
+ctx ██████░░ 78% | 5h ████░░░░ 52% (2h14m) | wk █░░░░░░░ 23% (4d) | h: ☐ 💧 drink water · 👀 3 💧 2
 ```
+
+| Line | Shows |
+|------|-------|
+| 1 | active to-do, model · reasoning effort, project, git branch with `↑↓` vs upstream, lines added/removed, session cost, elapsed minutes, **phase: subject** |
+| 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns, health nudge with today's tally |
+
+Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
+while you're idle. `bin/claude-code-status.js done` checks off the active one.
 
 ## How it works — three layers
 
