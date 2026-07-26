@@ -7,7 +7,9 @@ process.stdin.on('data', d => s += d).on('end', () => {
   try {
     const id = JSON.parse(s).session_id;
     if (!id || !/^[\w-]+$/.test(id)) return;
-    const f = path.join(os.homedir(), '.claude', 'session-context', id);
+    const dir = path.join(os.homedir(), '.claude', 'session-context');
+    fs.mkdirSync(dir, { recursive: true }); // the model's `echo > …` fails if the store doesn't exist yet
+    const f = path.join(dir, id);
     try {
       const st = fs.statSync(f);
       if (Date.now() - st.mtimeMs < 10 * 60_000) return; // fresh — stay silent, zero tokens
