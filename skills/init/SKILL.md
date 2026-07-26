@@ -1,22 +1,23 @@
 ---
 name: init
-description: Finish installing claude-status-bar - wires the status line renderer into settings.json and appends the phase rule to the user's global CLAUDE.md. Run once after installing the plugin.
+description: Repair or force the claude-status-bar install - re-point the statusLine at this plugin, or replace an existing status line it refused to overwrite. Not needed for a normal install, which configures itself on first session start.
 ---
 
-# Finish the claude-status-bar install
+# Repair the claude-status-bar install
 
-The plugin's two hooks are already wired by Claude Code. Two things it cannot do for you
-remain: the status line command, and the CLAUDE.md rule that teaches the phase format.
-Do both, then stop.
+Installing the plugin already configures everything on the next session start, via the
+`SessionStart` hook in `hooks/plugin-setup.js`. Run this skill only to fix the two cases that
+hook deliberately leaves alone.
 
-The **plugin root** is the directory containing this skill's grandparent — the folder holding
-`bin/`, `hooks/` and `docs/`. Resolve it to an absolute path before writing any config, and use
-that absolute path in `settings.json`. Do not write `${CLAUDE_PLUGIN_ROOT}` into settings.json;
-that variable is only substituted for plugin-owned files, not for user settings.
+The **plugin root** is this skill's grandparent directory — the folder holding `bin/`, `hooks/`
+and `docs/`. Resolve it to an absolute path first and write that absolute path into settings,
+never the literal `${CLAUDE_PLUGIN_ROOT}`, which is only substituted for plugin-owned files.
 
-## 1. Wire the status line
+## Case 1 — a different status line is already configured
 
-Read `~/.claude/settings.json` (create it as `{}` if missing) and set:
+The setup hook never overwrites a status line it did not install. If the user wants to switch,
+show them the current `statusLine.command` from `~/.claude/settings.json`, confirm they want it
+replaced, and only then set:
 
 ```json
 {
@@ -27,25 +28,21 @@ Read `~/.claude/settings.json` (create it as `{}` if missing) and set:
 }
 ```
 
-Preserve every other key in the file. If a `statusLine` already exists, show the user what it is
-and ask before replacing it — do not silently overwrite someone's existing status line.
+Preserve every other key in the file.
 
-## 2. Teach the phase format
+## Case 2 — the phase rule is missing or was edited away
 
-Read `docs/global-claude-rule.md` from the plugin root and append its contents to
-`~/.claude/CLAUDE.md`, creating that file if it does not exist.
+Check `~/.claude/CLAUDE.md` for `claude-status-bar:begin`. If absent, append the fenced
+`markdown` block from `docs/global-claude-rule.md` in the plugin root, wrapped in the same
+markers the hook uses:
 
-First check whether the rule is already there — grep for `session-context` in `~/.claude/CLAUDE.md`.
-If it matches, skip this step and say so rather than appending a duplicate.
+```
+<!-- claude-status-bar:begin — delete this block to remove the rule -->
+…rule…
+<!-- claude-status-bar:end -->
+```
 
-## 3. Report
+## Then
 
-Tell the user:
-
-- which files you changed
-- that the status line appears after restarting Claude Code
-- that the phase file lives at `~/.claude/session-context/<session_id>`, one plain-text file per
-  session, and `rm ~/.claude/session-context/*` clears it
-
-Then stop. Do not write a phase file yourself as a demonstration — the rule takes effect on the
-next session.
+Say which files changed and that the status line appears after restarting Claude Code. If both
+cases were already fine, say so instead of changing anything.
