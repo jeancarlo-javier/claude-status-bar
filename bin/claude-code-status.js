@@ -210,7 +210,7 @@ process.stdin.on('end', () => {
                         'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
         const m = t.match(/^([\p{L}\d&-]+):\s*(.*)/u);
         const c = m && (PHASE[m[1].toLowerCase()] || 250); // unknown phase labels allowed (dynamic pipelines) — bold grey
-        return c ? `\x1b[1;38;5;${c}m${m[1]}:\x1b[0m \x1b[38;5;117m${m[2]}\x1b[0m` : `\x1b[38;5;117m${t}\x1b[0m`;
+        return c ? `\x1b[1;38;5;${c}m${m[1]}:\x1b[0m ${m[2]}` : t;
       } catch { return ''; }
     })();
 
@@ -227,8 +227,8 @@ process.stdin.on('end', () => {
           ? rainbow(effortVal)
           : `${effortColorMap[effortVal.toLowerCase()] || ''}${effortVal}\x1b[0m`)
       : '';
-    const L1 = [effortStr ? `${model} · ${effortStr}` : model, path.basename(cwd)];
-    if (branch) L1.push(branch);
+    const dir = path.basename(cwd);
+    const L1 = [effortStr ? `${model} · ${effortStr}` : model, branch ? `${dir} · ${branch}` : dir];
     if (task) L1.unshift(task);
     if (d.cost?.total_lines_added != null) L1.push(`\x1b[32m+${d.cost.total_lines_added}\x1b[0m\x1b[31m-${d.cost.total_lines_removed}\x1b[0m`);
     if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
