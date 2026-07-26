@@ -45,7 +45,7 @@ Verify it renders, then tell me to restart.
 | File | Role |
 |------|------|
 | `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
-| `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. |
+| `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. Also intercepts `-hd` to check off the health reminder without spending a turn. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per session) if the phase file was never written — the deterministic enforcement layer. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
 
@@ -85,8 +85,9 @@ Every segment is optional — it only renders when Claude Code supplies the data
 branch, no `↑↓`; no rate-limit payload, no bars; no in-progress to-do, no task label).
 
 Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
-while you're idle. To check one off, send `d` as your whole next prompt — the nudge hook
-intercepts it and ends the turn, so the ack reaches no model and costs no tokens.
+while you're idle. Each one renders its own hint — `☐ 💧 drink water (send '-hd')`. Send
+`-hd` as your whole next prompt and the nudge hook intercepts it and ends the turn, so the
+ack reaches no model and costs no tokens.
 `bin/claude-code-status.js done` does the same from a shell.
 
 ## Token budget (measured)

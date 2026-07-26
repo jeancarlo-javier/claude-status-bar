@@ -2,10 +2,22 @@
 // UserPromptSubmit: echo the current session-context back to the model each turn
 // so the "Phase: subject" file stays fresh across phase transitions.
 const fs = require('fs'), os = require('os'), path = require('path');
+const { execFileSync } = require('child_process');
+const ACK_TOKEN = '-hd'; // type it alone + Enter to check off the health reminder
 let s = '';
 process.stdin.on('data', d => s += d).on('end', () => {
   try {
-    const id = JSON.parse(s).session_id;
+    const inp = JSON.parse(s);
+    if (inp.prompt?.trim() === ACK_TOKEN) { // `continue:false` stops the turn, so the ack costs no tokens
+      const bin = path.join(__dirname, '..', 'bin', 'claude-code-status.js');
+      let out;
+      try { out = execFileSync(process.execPath, [bin, 'done'], { encoding: 'utf8' }).trim(); }
+      catch { out = 'could not update health state'; }
+      // `continue:false` renders one clean line; exit 2 would print the hook command path + the original prompt
+      process.stdout.write(JSON.stringify({ continue: false, stopReason: out, suppressOutput: true }));
+      process.exit(0);
+    }
+    const id = inp.session_id;
     if (!id || !/^[\w-]+$/.test(id)) return;
     const dir = path.join(os.homedir(), '.claude', 'session-context');
     fs.mkdirSync(dir, { recursive: true }); // the model's `echo > …` fails if the store doesn't exist yet

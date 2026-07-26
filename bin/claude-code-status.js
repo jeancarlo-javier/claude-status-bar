@@ -11,6 +11,8 @@ const HEALTH_STATE_PATH = path.join(os.homedir(), '.claude', 'health-reminders.j
 const HEALTH_DISPLAY_MS = 5 * 60_000;          // 5 min stable window
 const HEALTH_IDLE_MS = 90 * 60_000;
 const HEALTH_GAP_MS = 10 * 60_000;             // min quiet time between consecutive reminders
+// as a prompt; the UserPromptSubmit hook checks the reminder off. \x1b[39m = default fg, then back to the segment's cyan
+const ACK_HINT = " \x1b[39m(send '-hd')\x1b[36m";
 const HEALTH_REMINDERS = {
   eyes:     { icon: '👀', interval: 20 * 60_000, phrases: ['look far for 20s', 'rest your eyes'] }, // 20-20-20 rule
   water:    { icon: '💧', interval: 45 * 60_000, phrases: ['drink water', 'take a water sip'] },
@@ -56,7 +58,7 @@ const selectHealthPhrase = (now) => {
     const tally = today ? ' · ' + Object.entries(today).map(([c, n]) => HEALTH_REMINDERS[c].icon + ' ' + n).join(' ') : '';
     if (s.current && now < s.current.expiresAt) {
       if (!(s.current.renders >= 2)) { s.current.renders = 2; writeHealthState(s); }
-      return s.current.phrase + pendingIcons(s, now, s.current.category) + tally;
+      return s.current.phrase + (s.current.acked ? '' : ACK_HINT) + pendingIcons(s, now, s.current.category) + tally;
     }
     if (now - s.lastActivityAt > HEALTH_IDLE_MS) {
       Object.keys(s.lastShown).forEach(k => s.lastShown[k] = now);
@@ -87,7 +89,7 @@ const selectHealthPhrase = (now) => {
     ];
     s.current = { category: best, phrase, dueAt: now, expiresAt: now + HEALTH_DISPLAY_MS, renders: 1 };
     writeHealthState(s);
-    return phrase + pendingIcons(s, now, best) + tally;
+    return phrase + ACK_HINT + pendingIcons(s, now, best) + tally;
   } catch { return null; } // status line never breaks on health-state I/O
 };
 
