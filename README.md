@@ -10,19 +10,6 @@ anyway.
 
 ![status line showing the session phase](assets/statusline.png)
 
-```
-Refactoring the parser | Fable 5 · high | claude-status-bar | master ↑2 | +315-50 | $20.86 | 178m | Exec: Statusline second line
-ctx ██████░░ 78% | 5h ████░░░░ 52% (2h14m) | wk █░░░░░░░ 23% (4d) | h: ☐ 💧 drink water · 👀 3 💧 2
-```
-
-| Line | Shows |
-|------|-------|
-| 1 | active to-do, model · reasoning effort, project, git branch with `↑↓` vs upstream, lines added/removed, session cost, elapsed minutes, **phase: subject** |
-| 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns, health nudge with today's tally |
-
-Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
-while you're idle. `bin/claude-code-status.js done` checks off the active one.
-
 ## How it works — three layers
 
 1. **Teach** — a rule in `~/.claude/CLAUDE.md` (see `docs/global-claude-rule.md`) defines the
@@ -81,6 +68,24 @@ Canonical labels are English. Semantic palette (256-color):
 | `Needs-Review:` | 226 bright yellow | **waiting on the user** |
 
 Subject text renders in light blue (117); lines truncate at 48 chars.
+
+## What the two lines show
+
+```
+Refactoring the parser | Fable 5 · high | claude-status-bar | master ↑2 | +315-50 | $20.86 | 178m | Exec: Statusline second line
+ctx ██████░░ 78% | 5h ████░░░░ 52% (2h14m) | wk █░░░░░░░ 23% (4d) | h: ☐ 💧 drink water · 👀 3 💧 2
+```
+
+| Line | Shows |
+|------|-------|
+| 1 | active to-do, model · reasoning effort, project, git branch with `↑↓` vs upstream, lines added/removed, session cost, elapsed minutes, **phase: subject** |
+| 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns, health nudge with today's tally |
+
+Every segment is optional — it only renders when Claude Code supplies the data (no upstream
+branch, no `↑↓`; no rate-limit payload, no bars).
+
+Health nudges rotate through eyes (20-20-20), water, movement and daylight, and stay quiet
+while you're idle. `bin/claude-code-status.js done` checks off the active one.
 
 ## Token budget (measured)
 
