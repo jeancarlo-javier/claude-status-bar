@@ -321,7 +321,7 @@ process.stdin.on('end', () => {
     limitStat('5h', rl?.five_hour);
     limitStat('wk', rl?.seven_day);
     const hp = selectHealthPhrase(Date.now());
-    if (hp) L2.push(`\x1b[36mhealth: ${hp}\x1b[0m`);
+    if (hp) L2.push(`\x1b[36mh: ${hp}\x1b[0m`);
 
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);
   } catch (e) {}

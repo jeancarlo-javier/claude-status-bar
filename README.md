@@ -104,7 +104,7 @@ Only the phase label is colored — the subject renders plain. Lines truncate at
 
 ```
 Fable 5 · xhigh | claude-status-bar · master | +1-1 | $3.12 | 14m | Done: All checks green
-ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d) | health: ☐ 💧 drink water (send '-hd')
+ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d) | h: ☐ 💧 drink water (send '-hd')
 ```
 
 | Line | Shows |

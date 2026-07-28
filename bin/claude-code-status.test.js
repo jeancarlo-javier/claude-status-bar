@@ -84,7 +84,7 @@ function ack() {
 // health is always the last segment on line 2 — presence check folded into every call.
 function seg(out) {
   const line2 = out.split('\n')[1] || '';
-  const m = line2.match(/health: (.*)$/);
+  const m = line2.match(/h: (.*)$/);
   assert.ok(m, `no health segment found in output: ${JSON.stringify(out)}`);
   return m[1];
 }
