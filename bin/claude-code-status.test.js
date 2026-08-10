@@ -34,13 +34,14 @@ function render() {
 
 async function main() {
   const out = await render();
-  const [line1, line2] = out.split('\n');
+  const plain = out.replace(/\x1b\[[0-9;]*m/g, '');
+  const [line1, line2] = plain.split('\n');
 
-  assert.ok(line1.includes('M'), `model missing: ${JSON.stringify(out)}`);
-  assert.ok(line2.includes('ctx '), `context segment missing: ${JSON.stringify(out)}`);
-  assert.ok(line2.includes('63%'), `context percentage missing: ${JSON.stringify(out)}`);
+  assert.ok(line1.includes('M'), `model missing: ${JSON.stringify(plain)}`);
+  assert.ok(line2.includes('ctx '), `context segment missing: ${JSON.stringify(plain)}`);
+  assert.ok(line2.includes('63%'), `context percentage missing: ${JSON.stringify(plain)}`);
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
-    assert.ok(!out.includes(token), `removed health token rendered: ${token}`);
+    assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
   }
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'health-reminders.json')),
     'health state file was created');
