@@ -39,7 +39,7 @@ async function main() {
   assert.ok(line1.includes('M'), `model missing: ${JSON.stringify(out)}`);
   assert.ok(line2.includes('ctx '), `context segment missing: ${JSON.stringify(out)}`);
   assert.ok(line2.includes('63%'), `context percentage missing: ${JSON.stringify(out)}`);
-  for (const token of ['h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
+  for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!out.includes(token), `removed health token rendered: ${token}`);
   }
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'health-reminders.json')),

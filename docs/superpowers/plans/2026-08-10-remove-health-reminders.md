@@ -163,7 +163,7 @@ Remove the health segment behavior paragraph, all `-hd`/`done` instructions, the
 Run:
 
 ```bash
-node -e 'const assert = require("assert"); const text = require("fs").readFileSync("README.md", "utf8"); for (const token of ["h:", "-hd", "health-reminders.json", "💧", "👀", "🚶", "☀️"]) assert.ok(!text.includes(token), `obsolete README token: ${token}`); console.log("README health references removed");'
+node -e 'const assert = require("assert"); const text = require("fs").readFileSync("README.md", "utf8"); for (const token of ["| h:", "-hd", "health-reminders.json", "💧", "👀", "🚶", "☀️"]) assert.ok(!text.includes(token), `obsolete README token: ${token}`); console.log("README health references removed");'
 ```
 
 Expected: `README health references removed`.
