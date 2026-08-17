@@ -39,7 +39,8 @@ async function main() {
 
   assert.ok(line1.includes('M'), `model missing: ${JSON.stringify(plain)}`);
   assert.ok(line2.includes('ctx '), `context segment missing: ${JSON.stringify(plain)}`);
-  assert.ok(line2.includes('63%'), `context percentage missing: ${JSON.stringify(plain)}`);
+  // remaining_percentage 50 -> 50% used, the same number /context reports (no 80%-budget rescale)
+  assert.ok(line2.includes('50%'), `context percentage missing: ${JSON.stringify(plain)}`);
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
   }

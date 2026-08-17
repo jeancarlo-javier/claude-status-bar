@@ -137,8 +137,9 @@ process.stdin.on('end', () => {
     };
     const rem = d.context_window?.remaining_percentage;
     if (rem != null) {
-      const u = Math.max(0, Math.min(100, 100 - rem));
-      L2.push(`ctx ${bar(Math.min(100, Math.round(u / 80 * 100)))} ${Math.round(u / 80 * 100)}%`);
+      // true share of the window, matching /context — auto-compact at 80% is signalled by bar() turning red
+      const u = Math.round(Math.max(0, Math.min(100, 100 - rem)));
+      L2.push(`ctx ${bar(u)} ${u}%`);
     }
     limitStat('5h', rl?.five_hour);
     limitStat('wk', rl?.seven_day);

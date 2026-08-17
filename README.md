@@ -110,7 +110,7 @@ ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk �
 | Line | Shows |
 |------|-------|
 | 1 | active to-do, model · reasoning effort, project · git branch (`↑↓` vs upstream), lines added/removed, session cost, elapsed minutes, **phase: subject** |
-| 2 | context window used (as a share of the 80% auto-compact budget), 5-hour and weekly rate limits with reset countdowns |
+| 2 | context window used (same number `/context` reports; the bar turns red at the 80% auto-compact threshold), 5-hour and weekly rate limits with reset countdowns |
 
 Every segment is optional: the renderer only displays a segment when Claude Code
 supplies its data (no upstream branch, no `↑↓`; no rate-limit payload, no bars; no
