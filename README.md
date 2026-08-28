@@ -77,7 +77,7 @@ Verify it renders, then tell me to restart.
 |------|------|
 | `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. |
-| `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per session) if the phase file was never written — the deterministic enforcement layer. |
+| `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per turn) if the phase file was never written, still holds the example template, or has not changed in 30 minutes — the deterministic enforcement layer. The block offers `touch` for a line that is still right, so keeping an honest label is cheaper than inventing one. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
 | `.claude-plugin/` | Plugin and marketplace manifests, so the repo installs as a Claude Code plugin. |
 | `hooks/hooks.json` | Wires all three hooks automatically when installed as a plugin. |
@@ -111,12 +111,17 @@ chars; branch names and change ids at 32.
 
 ### Time in phase
 
-The label carries the file's age once it has stood for **20 minutes** (`Exec 40m: …`), and
-dims past **90 minutes**. Measured over 38 real sessions (median 134 min, 4 phase writes),
-the label was more than 15 minutes out of date 57% of the wall clock: a subject survives a
-whole pipeline, a phase does not. So the two halves are no longer drawn with equal
-confidence — the age says how long nobody has confirmed the label, and the same number
-answers *is it stuck on this?* The subject stays at full brightness; it is the half that holds.
+The label carries its age once it has stood for **20 minutes** (`Exec 40m: …`), and dims past
+**90 minutes**. Measured over 38 real sessions (median 134 min, 4 phase writes), the label was
+more than 15 minutes out of date 57% of the wall clock: a subject survives a whole pipeline, a
+phase does not. So the two halves are no longer drawn with equal confidence — and the same
+number answers *is it stuck on this?* The subject stays at full brightness; it is the half that holds.
+
+The clock measures time since the label's **text** changed, not the file's mtime. Both hooks tell
+the model to `touch` a label that is still correct, so an mtime clock would restart on every
+acknowledgement and this segment would never reach its 20-minute floor. The renderer keeps the
+earlier of the two under `$TMPDIR`, so a touch confirms the phase without erasing how long it has
+run.
 
 ## What the two lines show
 
@@ -165,10 +170,11 @@ Typical session: 300–800 tokens total.
 - **Reads:** your phase file (contents and mtime), `openspec/changes/`
   in the current project, your session transcript (output-token counts only, read
   incrementally — see below), and two read-only `git` commands in the current repo.
-- **Writes:** one small counter per session under `$TMPDIR` (`ccs-tps-<session>.json`),
-  holding the running output-token total and the transcript offset already counted, so the
-  renderer reads only the bytes appended since the last refresh instead of re-reading a
-  transcript that grows to tens of megabytes.
+- **Writes:** two small per-session files under `$TMPDIR`. `ccs-tps-<session>.json` holds the
+  running output-token total and the transcript offset already counted, so the renderer reads
+  only the bytes appended since the last refresh instead of re-reading a transcript that grows to
+  tens of megabytes. `ccs-phase-<session>.json` holds the current phase line and when it first
+  appeared, which is what makes time-in-phase survive a `touch`.
 - The phase file itself is written by the model's own `echo`, not by this tool.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes
   up to 120 chars of it back to the model — so the subject reaches the API as part of your

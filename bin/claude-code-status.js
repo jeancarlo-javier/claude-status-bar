@@ -96,7 +96,20 @@ process.stdin.on('end', () => {
         // does not. So the file's mtime is shown once the label has stood a while — the same number
         // answers "is this still true?" and "has it been stuck on this?" — and the label dims once it
         // is old enough to be a guess. The subject keeps full brightness: it is the half that holds.
-        const mins = Math.round((Date.now() - fs.statSync(f).mtimeMs) / 60000);
+        // Time in phase has to survive an acknowledgement. Both hooks tell the model to `touch` a
+        // label that is still right, which resets mtime — so mtime alone would restart this clock
+        // every time the nudge fires and the age would never reach the 20-minute floor. Track when
+        // the text last *changed*; mtime is only the seed the first time a label is seen.
+        let since = fs.statSync(f).mtimeMs;
+        const seen = path.join(os.tmpdir(), `ccs-phase-${session.replace(/[^\w.-]+/g, '_')}.json`);
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(seen, 'utf8')); } catch {}
+        // a touch bumps mtime without changing the label, so the older of the two is the honest start
+        if (prev && prev.text === t) since = Math.min(prev.since, since);
+        if (!prev || prev.text !== t || prev.since !== since) {
+          try { fs.writeFileSync(seen, JSON.stringify({ text: t, since })); } catch {}
+        }
+        const mins = Math.round((Date.now() - since) / 60000);
         const style = `\x1b[${mins >= 90 ? 2 : 1};${c === 226 ? '7;' : ''}38;5;${c}m`; // 226 = waiting on the user: a chip you can spot from another tab
         const age = mins >= 20 ? ` ${dur(mins)}` : '';
         return `${style}${m[1]}\x1b[0;38;5;245m${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age

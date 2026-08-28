@@ -57,6 +57,9 @@ try {
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
   fs.rmSync(phaseFile, { force: true });
+  // the renderer's per-session sidecars: left behind, the next run sees the same label with an
+  // older start time and renders an age, so the SVG would drift between local runs
+  for (const k of ['phase', 'tps']) fs.rmSync(path.join(os.tmpdir(), `ccs-${k}-${PAYLOAD.session_id}.json`), { force: true });
 }
 
 // ---- ANSI -> coloured runs --------------------------------------------------------------

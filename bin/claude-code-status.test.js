@@ -105,6 +105,17 @@ async function main() {
   assert.ok(old.startsWith('\x1b[2;'), `stale phase label not dimmed: ${JSON.stringify(old.slice(0, 30))}`);
   assert.ok(old.replace(/\x1b\[[0-9;]*m/g, '').startsWith('Exec 3h20m: '), `stale phase age wrong: ${JSON.stringify(old)}`);
 
+  // an acknowledgement is not a transition: both hooks tell the model to `touch` a label that is
+  // still right, and mtime alone would restart the clock every time that happened
+  setPhase('Exec: Compact the status bar', 0);   // same text, mtime reset to now — a touch
+  assert.ok((await render()).replace(/\x1b\[[0-9;]*m/g, '').startsWith('Exec 3h20m: '),
+    'a touch on an unchanged label restarted the time-in-phase clock');
+
+  // a genuinely new label does start the clock over
+  setPhase('Verify: the migration ran', 0);
+  assert.ok(!/Verify \d/.test((await render()).replace(/\x1b\[[0-9;]*m/g, '')),
+    'a changed label kept the previous phase age');
+
   // waiting on the user is the one state that has to carry across tabs: reverse-video chip
   setPhase('Needs-Review: approve the plan');
   assert.ok((await render()).startsWith('\x1b[1;7;38;5;226mNeeds-Review'), 'Needs-Review is not rendered as a chip');
