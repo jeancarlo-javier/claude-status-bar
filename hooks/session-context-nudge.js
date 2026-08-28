@@ -20,6 +20,19 @@ process.stdin.on('data', d => s += d).on('end', () => {
       const t = fs.readFileSync(f, 'utf8').trim().split('\n')[0].slice(0, 120);
       console.log(`session-context (status line) still shows "${t}" — stale. If the phase/subject changed, you MUST update now: echo "<Phase>: <subject>" > "${f}" (any short phase label: Plan, Exec, Q&A, Verify, Focus, ...). If still accurate, touch the file.`);
     } catch {
+      // One file per session and nothing ever removes them: 13 a day, 470 after 35 days, each
+      // holding 34 bytes in a 4KB block. Prune here — this branch runs on the first turn of a
+      // session, not on every turn — and never touch this session's own file.
+      const CUTOFF = 30 * 86400_000;
+      try {
+        for (const n of fs.readdirSync(dir)) {
+          if (n === id) continue;
+          try {
+            const st = fs.lstatSync(path.join(dir, n));
+            if (st.isFile() && Date.now() - st.mtimeMs > CUTOFF) fs.rmSync(path.join(dir, n));
+          } catch {}
+        }
+      } catch {}
       console.log(`session-context (status line) is EMPTY. Required, same turn — once the session's focus is clear: echo "<Phase>: <subject ≤6 words>" > "${f}" (e.g. "Focus: Fix Eventrid client header"). Do not wait to be asked.`);
     }
   } catch {}

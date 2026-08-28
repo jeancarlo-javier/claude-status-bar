@@ -76,7 +76,7 @@ Verify it renders, then tell me to restart.
 | File | Role |
 |------|------|
 | `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
-| `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. |
+| `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. On the missing branch — the first turn of a session — it also deletes phase files older than 30 days. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per turn) if the phase file was never written, still holds the example template, or has not changed in 30 minutes — the deterministic enforcement layer. The block offers `touch` for a line that is still right, so keeping an honest label is cheaper than inventing one. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
 | `.claude-plugin/` | Plugin and marketplace manifests, so the repo installs as a Claude Code plugin. |
@@ -179,8 +179,11 @@ Typical session: 300–800 tokens total.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes
   up to 120 chars of it back to the model — so the subject reaches the API as part of your
   next prompt, exactly like anything you type.
-- **Retention:** session files are never auto-deleted. Subjects can name projects or
-  clients — `rm ~/.claude/session-context/*` whenever you like.
+- **Retention:** the store is one 34-byte file per session, so it grows by roughly 13 files a
+  day and nothing else prunes it. The nudge hook deletes files older than **30 days** on the
+  first turn of each new session — never the running session's own file, and never anything that
+  is not a regular file. Subjects can name projects or clients, so shorten that window in
+  `hooks/session-context-nudge.js`, or `rm ~/.claude/session-context/*` whenever you like.
 
 ## Verified behavior (2026-07-24)
 

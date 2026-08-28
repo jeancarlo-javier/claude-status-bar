@@ -24,6 +24,7 @@ jobs:
         run: |
           node bin/claude-code-status.test.js
           node hooks/session-context-guard.test.js
+          node hooks/session-context-nudge.test.js
 
       # make-screenshot.js runs `git init` in a throwaway project to give the demo a branch name
       - name: Regenerate the SVG
