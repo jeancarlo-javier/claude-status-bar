@@ -1,0 +1,34 @@
+name: screenshot
+
+# bin/make-screenshot.js renders assets/statusline.svg by piping a fixed payload through the real
+# renderer, so a change to bin/claude-code-status.js silently invalidates the README picture.
+# Regenerate here and fail if the committed SVG no longer matches. Nothing is pushed back — the
+# fix is to run `node bin/make-screenshot.js --png` locally and commit the result.
+#
+# This only catches renderer changes the demo payload actually exercises. A change to a state the
+# payload does not hit (the 95% blink, a complete change's tick) passes here and belongs in
+# bin/claude-code-status.test.js instead.
+
+on: [push, pull_request]
+
+jobs:
+  up-to-date:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # make-screenshot.js runs `git init` in a throwaway project to give the demo a branch name
+      - name: Regenerate the SVG
+        run: node bin/make-screenshot.js
+
+      - name: Fail if it drifted from the committed asset
+        run: |
+          if ! git diff --quiet -- assets/statusline.svg; then
+            echo "::error file=assets/statusline.svg::Screenshot is stale. Run 'node bin/make-screenshot.js --png' and commit assets/."
+            git diff -- assets/statusline.svg
+            exit 1
+          fi
+          echo "assets/statusline.svg is current"
