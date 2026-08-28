@@ -11,6 +11,10 @@ anyway.
 
 ![status line showing the session phase](assets/statusline.png)
 
+<sub>Regenerate with `node bin/make-screenshot.js --png` — it pipes a fixed payload through the
+real renderer, so the picture cannot drift from what the bar prints. Drop `--png` for the SVG
+alone, which needs nothing installed.</sub>
+
 ## How it works — three layers
 
 1. **Teach** — a rule in `~/.claude/CLAUDE.md` (see `docs/global-claude-rule.md`) defines the

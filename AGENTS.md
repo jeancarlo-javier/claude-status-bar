@@ -16,5 +16,8 @@ git tag -a vX.Y.Z -m "vX.Y.Z — one line" && git push origin vX.Y.Z
 gh release create vX.Y.Z --title "vX.Y.Z — one line" --notes-file <notes>
 ```
 
+Before tagging, refresh the screenshot if the renderer changed:
+`node bin/make-screenshot.js --png`.
+
 Never move a published tag — cut the next patch instead. Tag `HEAD`, never a commit behind it:
 the tarball is what people download.

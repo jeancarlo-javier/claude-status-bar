@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="809" height="164" viewBox="0 0 809 164" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+  <defs>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="55"/></filter>
+    <clipPath id="card"><rect width="809" height="164" rx="16"/></clipPath>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+  </defs>
+  <g clip-path="url(#card)">
+    <rect width="809" height="164" fill="#0b0a12"/>
+    <g filter="url(#blur)">
+      <ellipse cx="145.62" cy="36.08" rx="210.34" ry="114.8" fill="#3b2a7a" opacity="0.95"/>
+      <ellipse cx="372.14000000000004" cy="127.92" rx="242.7" ry="131.20000000000002" fill="#7b2f6b" opacity="0.8"/>
+      <ellipse cx="598.66" cy="29.52" rx="210.34" ry="123" fill="#2a4a8c" opacity="0.85"/>
+      <ellipse cx="752.37" cy="114.8" rx="161.8" ry="114.8" fill="#a33f7d" opacity="0.6"/>
+    </g>
+    <rect x="34" y="34" width="741" height="96" rx="11" fill="#0d0e15" fill-opacity="0.62"/>
+    <rect x="34.5" y="34.5" width="740" height="95" rx="10.5" fill="none" stroke="url(#edge)"/>
+  </g>
+  <text x="56" y="70" xml:space="preserve"><tspan x="56.0" fill="#ffd700" font-weight="700">Exec:</tspan><tspan x="98.0" fill="#d8d8d8"> Compact the status line | Opus 5 </tspan><tspan x="383.6" fill="rgb(179,136,244)">xhigh</tspan><tspan x="425.6" fill="#d8d8d8"> | claude-status-bar</tspan><tspan x="593.6" fill="#8a8a8a">@</tspan><tspan x="602.0" fill="#d8d8d8">main | </tspan><tspan x="660.8" fill="#29b8db">$3.12</tspan><tspan x="702.8" fill="#d8d8d8"> | </tspan><tspan x="728.0" fill="#23d18b">14m</tspan></text>
+  <text x="56" y="96" xml:space="preserve"><tspan x="56.0" fill="#d8d8d8">chg add-compact-gauges </tspan><tspan x="249.2" fill="#f5f543">2/4</tspan><tspan x="274.4" fill="#d8d8d8"> | ctx </tspan><tspan x="333.2" fill="#23d18b">▃ 38%</tspan><tspan x="375.2" fill="#d8d8d8"> | 5h </tspan><tspan x="425.6" fill="#23d18b">▃ 35%</tspan><tspan x="467.6" fill="#d8d8d8"> | wk </tspan><tspan x="518.0" fill="#ff8700">▆ 71%</tspan><tspan x="560.0" fill="#d8d8d8"> </tspan><tspan x="568.4" fill="#8a8a8a">(3d)</tspan></text>
+</svg>
