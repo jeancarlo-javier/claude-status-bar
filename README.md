@@ -98,23 +98,35 @@ Canonical labels are English. Semantic palette (256-color):
 | `Focus:` | 213 pink | daily focus |
 | `Needs-Review:` | 226 bright yellow | **waiting on the user** |
 
-Only the phase label is colored — the subject renders plain. Lines truncate at 48 chars.
+Only the phase label is colored — the subject renders plain. The subject truncates at 48
+chars; branch names and change ids at 32.
 
 ## What the two lines show
 
 ```
-Fable 5 · xhigh | claude-status-bar · master | +1-1 | $3.12 | 14m | Done: All checks green
-ctx ░░░░░░░░ 8% | 5h ██░░░░░░ 35% (2h24m) | wk ███░░░░░ 43% (3d)
+Done: All checks green | Fable 5 xhigh | claude-status-bar@master | $3.12 | 14m
+chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% | wk ▆ 71% (3d)
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | active to-do, model · reasoning effort, project · git branch (`↑↓` vs upstream), lines added/removed, session cost, elapsed minutes, **phase: subject** |
-| 2 | context window used (same number `/context` reports; the bar turns red at the 80% auto-compact threshold), 5-hour and weekly rate limits with reset countdowns |
+| 1 | **phase: subject** first, since it is the thing you actually read; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), session cost, elapsed minutes |
+| 2 | the OpenSpec change being worked and its task progress, context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
+
+Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
+green under 40%, yellow, orange, red at 80% (the auto-compact threshold), blinking
+red at 95%. A reset countdown only appears once that limit is past 60%, where it
+starts to matter.
+
+The `chg` segment tracks `openspec/changes/`: `2/4` is checked tasks, `✓` means every
+box is ticked and it is ready to `/opsx:archive`, a lone `·` is a proposal whose
+`tasks.md` does not exist yet, and `+3o` counts the other changes left open. Archiving
+one drops it on the next render.
 
 Every segment is optional: the renderer only displays a segment when Claude Code
-supplies its data (no upstream branch, no `↑↓`; no rate-limit payload, no bars; no
-in-progress to-do, no task label).
+supplies its data (no upstream branch, no `↑↓`; no rate-limit payload, no meters; no
+`openspec/` directory, no change). When a session has not written a phase file yet,
+the active to-do stands in for it on line 1.
 
 
 ## Token budget (measured)
@@ -133,8 +145,13 @@ Typical session: 300–800 tokens total.
 
 - **No network, no dependencies.** The three scripts require `fs`, `os`, `path`,
   `child_process` — nothing else. No HTTP, no telemetry, no analytics.
-- **Reads:** your phase file, `~/.claude/todos/` (the active task label), and two read-only
-  `git` commands in the current repo.
+- **Reads:** your phase file, `~/.claude/todos/` (the active task label), `openspec/changes/`
+  in the current project, your session transcript (output-token counts only, read
+  incrementally — see below), and two read-only `git` commands in the current repo.
+- **Writes:** one small counter per session under `$TMPDIR` (`ccs-tps-<session>.json`),
+  holding the running output-token total and the transcript offset already counted, so the
+  renderer reads only the bytes appended since the last refresh instead of re-reading a
+  transcript that grows to tens of megabytes.
 - The phase file itself is written by the model's own `echo`, not by this tool.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes
   up to 120 chars of it back to the model — so the subject reaches the API as part of your
