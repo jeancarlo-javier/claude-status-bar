@@ -100,21 +100,34 @@ Canonical labels are English. Semantic palette (256-color):
 | `Done:` | 114 green | finished |
 | `Debug:` / `Fix:` | 203 red | trouble |
 | `Focus:` | 213 pink | daily focus |
-| `Needs-Review:` | 226 bright yellow | **waiting on the user** |
+| `Chat:` | 117 sky | conversation, no task |
+| `Docs:` | 109 slate | writing docs |
+| `Explore:` / `Analysis:` | 176 orchid | thinking |
+| `Critique:` | 208 orange | questioning |
+| `Needs-Review:` | 226 bright yellow | **waiting on the user**, drawn as a reverse-video chip |
 
 Only the phase label is colored — the subject renders plain. The subject truncates at 48
 chars; branch names and change ids at 32.
 
+### Time in phase
+
+The label carries the file's age once it has stood for **20 minutes** (`Exec 40m: …`), and
+dims past **90 minutes**. Measured over 38 real sessions (median 134 min, 4 phase writes),
+the label was more than 15 minutes out of date 57% of the wall clock: a subject survives a
+whole pipeline, a phase does not. So the two halves are no longer drawn with equal
+confidence — the age says how long nobody has confirmed the label, and the same number
+answers *is it stuck on this?* The subject stays at full brightness; it is the half that holds.
+
 ## What the two lines show
 
 ```
-Done: All checks green | Fable 5 xhigh | claude-status-bar@master | $3.12 | 14m
+Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | $3.12 | 55m
 chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% | wk ▆ 71% (3d)
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | **phase: subject** first, since it is the thing you actually read; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), session cost, elapsed minutes |
+| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), session cost, elapsed minutes |
 | 2 | the OpenSpec change being worked and its task progress, context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
@@ -129,8 +142,8 @@ one drops it on the next render.
 
 Every segment is optional: the renderer only displays a segment when Claude Code
 supplies its data (no upstream branch, no `↑↓`; no rate-limit payload, no meters; no
-`openspec/` directory, no change). When a session has not written a phase file yet,
-the active to-do stands in for it on line 1.
+`openspec/` directory, no change). A session that has not written a phase file yet simply
+starts line 1 at the model — the Stop hook is what keeps that rare.
 
 
 ## Token budget (measured)
@@ -149,7 +162,7 @@ Typical session: 300–800 tokens total.
 
 - **No network, no dependencies.** The three scripts require `fs`, `os`, `path`,
   `child_process` — nothing else. No HTTP, no telemetry, no analytics.
-- **Reads:** your phase file, `~/.claude/todos/` (the active task label), `openspec/changes/`
+- **Reads:** your phase file (contents and mtime), `openspec/changes/`
   in the current project, your session transcript (output-token counts only, read
   incrementally — see below), and two read-only `git` commands in the current repo.
 - **Writes:** one small counter per session under `$TMPDIR` (`ccs-tps-<session>.json`),

@@ -31,9 +31,8 @@ process.stdin.on('end', () => {
       return `${c}${g} ${pct}%\x1b[0m`;
     };
 
-    const reset = (epoch) => {
-      if (!epoch) return '';
-      const min = Math.max(0, Math.round((epoch * 1000 - Date.now()) / 60000));
+    // "2d3h" / "4h20m" / "35m" — shared by the rate-limit reset and the phase's time-in-phase
+    const dur = (min) => {
       const h = Math.floor(min / 60), m = min % 60;
       if (h >= 24) {
         const dys = Math.floor(h / 24), hh = h % 24;
@@ -41,6 +40,7 @@ process.stdin.on('end', () => {
       }
       return h > 0 ? `${h}h${m ? m + 'm' : ''}` : `${m}m`;
     };
+    const reset = (epoch) => (epoch ? dur(Math.max(0, Math.round((epoch * 1000 - Date.now()) / 60000))) : '');
 
     // Animated rainbow (cycles each render)
     const rainbow = (text) => {
@@ -74,35 +74,33 @@ process.stdin.on('end', () => {
       } catch { return ''; }
     })();
 
-    const task = (() => {
-      const dir = path.join(os.homedir(), '.claude', 'todos');
-      if (!session || !fs.existsSync(dir)) return '';
-      try {
-        const f = fs.readdirSync(dir)
-          .filter(f => f.startsWith(session) && f.includes('-agent-') && f.endsWith('.json'))
-          .map(f => ({ f, t: fs.statSync(path.join(dir, f)).mtime }))
-          .sort((a, b) => b.t - a.t)[0];
-        if (!f) return '';
-        const t = JSON.parse(fs.readFileSync(path.join(dir, f.f), 'utf8')).find(t => t.status === 'in_progress');
-        return t?.activeForm || '';
-      } catch { return ''; }
-    })();
-
     // session focus "Phase: subject" (e.g. "Exec: DB User Schema migration"), written by Claude per CLAUDE.md rule
     const sessionCtx = (() => {
       if (!session) return '';
       try {
-        const buf = fs.readFileSync(path.join(os.homedir(), '.claude', 'session-context', session));
+        const f = path.join(os.homedir(), '.claude', 'session-context', session);
+        const buf = fs.readFileSync(f);
         // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
-        let t = (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
-          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
-        if (t.length > 48) t = t.slice(0, 46) + '..';
+        const t = trunc((buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
+          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1'), 48);
         // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
-        const PHASE = { research: 176, plan: 111, 'review-plan': 141, exec: 220, 'q&a': 208, review: 208, 'review-execution': 208, verify: 80, done: 114, debug: 203, fix: 203, focus: 213,
+        const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, 'review-plan': 141, exec: 220,
+                        'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
+                        debug: 203, fix: 203, focus: 213, chat: 117, docs: 109,
                         'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
         const m = t.match(/^([\p{L}\d&-]+):\s*(.*)/u);
-        const c = m && (PHASE[m[1].toLowerCase()] || 250); // unknown phase labels allowed (dynamic pipelines) — bold grey
-        return c ? `\x1b[1;38;5;${c}m${m[1]}:\x1b[0m ${m[2]}` : t;
+        if (!m) return t;
+        const c = PHASE[m[1].toLowerCase()] || 250; // unknown phase labels allowed (dynamic pipelines) — bold grey
+        // Measured across 38 real sessions (median 134min, 4 phase writes): the label is >15min out
+        // of date 57% of the wall clock, because the subject survives a whole pipeline and the phase
+        // does not. So the file's mtime is shown once the label has stood a while — the same number
+        // answers "is this still true?" and "has it been stuck on this?" — and the label dims once it
+        // is old enough to be a guess. The subject keeps full brightness: it is the half that holds.
+        const mins = Math.round((Date.now() - fs.statSync(f).mtimeMs) / 60000);
+        const style = `\x1b[${mins >= 90 ? 2 : 1};${c === 226 ? '7;' : ''}38;5;${c}m`; // 226 = waiting on the user: a chip you can spot from another tab
+        const age = mins >= 20 ? ` ${dur(mins)}` : '';
+        return `${style}${m[1]}\x1b[0;38;5;245m${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age
+
       } catch { return ''; }
     })();
 
@@ -217,9 +215,7 @@ process.stdin.on('end', () => {
       L1.push(`${timeColor(mins)}${mins}m\x1b[0m`);
     }
     // The phase is the headline feature, so it leads instead of trailing five ambient segments.
-    // The in-progress todo says the same thing in the model's other words, so it is only the
-    // stand-in for a session that has not written a phase yet.
-    if (sessionCtx || task) L1.unshift(sessionCtx || `\x1b[38;5;250m${trunc(task, 48)}\x1b[0m`);
+    if (sessionCtx) L1.unshift(sessionCtx);
 
     // ---- Line 2 (stats joined by |) ----
     const L2 = [];

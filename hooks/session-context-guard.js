@@ -26,7 +26,7 @@ process.stdin.on('data', d => s += d).on('end', () => {
     catch { return; }                                // nowhere to write → the block is unsatisfiable
     console.log(JSON.stringify({
       decision: 'block',
-      reason: `session-context (status line) was never written this session. Before finishing, run: echo "Phase: subject ≤6 words" > "${f}" — phase is any short label (Focus, Plan, Exec, Q&A, Verify, Done, Needs-Review, ...). If the session is just conversation with no task, use "Chat: <topic>". Then finish your response normally.`
+      reason: `session-context (status line) was never written this session. Before finishing, run: echo "<Phase>: <subject ≤6 words>" > "${f}" — e.g. "Exec: Fix the client header"; phase is any short label (Focus, Plan, Exec, Q&A, Verify, Done, Needs-Review, ...). If the session is just conversation with no task, use "Chat: <topic>". Then finish your response normally.`
     }));
   } catch {}
 });

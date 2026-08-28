@@ -37,7 +37,19 @@ fs.writeFileSync(path.join(chg, 'just-proposed-change', 'tasks.md'), '- [ ] a\n-
 fs.mkdirSync(path.join(chg, 'bare-proposal'), { recursive: true });
 fs.writeFileSync(path.join(chg, 'bare-proposal', 'proposal.md'), '# p\n');
 
+// the phase segment reads ~/.claude/session-context/<session_id>, and its mtime is the age shown
+const SESSION = 'sess-test';
+const phaseFile = path.join(home, '.claude', 'session-context', SESSION);
+fs.mkdirSync(path.dirname(phaseFile), { recursive: true });
+const setPhase = (text, minutesAgo = 0) => {
+  fs.writeFileSync(phaseFile, text + '\n');
+  const t = new Date(Date.now() - minutesAgo * 60000);
+  fs.utimesSync(phaseFile, t, t);
+};
+setPhase('Exec: Compact the status bar');
+
 const STDIN_JSON = JSON.stringify({
+  session_id: SESSION,
   model: { display_name: 'M (1M context)' },
   workspace: { current_dir: home },
   context_window: { remaining_percentage: 50 },
@@ -77,6 +89,26 @@ async function main() {
   assert.ok(!plain.includes('just-proposed'), `fresh proposal stole the bar: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('bare-proposal'), `a change with no tasks.md stole the bar: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('…'), `change id was truncated: ${JSON.stringify(plain)}`);
+
+  // a phase written just now is the label alone — no age until it has stood long enough to doubt
+  assert.ok(line1.startsWith('Exec: Compact the status bar'), `phase segment missing or not leading: ${JSON.stringify(line1)}`);
+  assert.ok(!/Exec \d/.test(line1), `age shown on a fresh phase: ${JSON.stringify(line1)}`);
+
+  // past 20 minutes the mtime is shown, so a label nobody has confirmed reads as one
+  setPhase('Exec: Compact the status bar', 40);
+  assert.ok((await render()).replace(/\x1b\[[0-9;]*m/g, '').startsWith('Exec 40m: Compact the status bar'),
+    'time-in-phase not shown on a 40-minute-old phase');
+
+  // past 90 minutes the label itself dims (SGR 2) — the subject stays at full brightness
+  setPhase('Exec: Compact the status bar', 200);
+  const old = await render();
+  assert.ok(old.startsWith('\x1b[2;'), `stale phase label not dimmed: ${JSON.stringify(old.slice(0, 30))}`);
+  assert.ok(old.replace(/\x1b\[[0-9;]*m/g, '').startsWith('Exec 3h20m: '), `stale phase age wrong: ${JSON.stringify(old)}`);
+
+  // waiting on the user is the one state that has to carry across tabs: reverse-video chip
+  setPhase('Needs-Review: approve the plan');
+  assert.ok((await render()).startsWith('\x1b[1;7;38;5;226mNeeds-Review'), 'Needs-Review is not rendered as a chip');
+  setPhase('Exec: Compact the status bar');
 
   // model display name is stripped of its parenthetical ("Opus 5 (1M context)" -> "Opus 5")
   assert.ok(!line1.includes('('), `model parenthetical not stripped: ${JSON.stringify(plain)}`);
