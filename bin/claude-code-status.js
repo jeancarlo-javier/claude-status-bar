@@ -13,20 +13,22 @@ process.stdin.on('data', c => input += c);
 process.stdin.on('end', () => {
   try {
     const d = JSON.parse(input);
-    const model = d.model?.display_name || 'Claude';
+    const model = (d.model?.display_name || 'Claude').replace(/\s*\([^)]*\)\s*$/, ''); // "Opus 5 (1M context)" -> "Opus 5"
     const cwd = d.workspace?.current_dir || process.cwd();
     const session = d.session_id || '';
 
-    // Bar (8 segments for compactness)
-    const bar = (pct) => {
-      const f = Math.floor(pct / 12.5);
-      const b = '█'.repeat(f) + '░'.repeat(8 - f);
+    // One-cell fill gauge plus its number. The old 8-block bar only resolved to 12.5% steps, so a
+    // single glyph off the same ramp is the same signal at a twelfth of the width, and the digits
+    // carry the precision. Colour now wraps both: with one cell of fill left, the number has to
+    // carry the urgency too.
+    const gauge = (pct) => {
+      const g = '▁▁▂▃▄▅▆▇█'[Math.max(0, Math.min(8, Math.round(pct / 12.5)))];
       let c = '\x1b[32m';
       if (pct >= 95)      c = '\x1b[5;31m';
       else if (pct >= 80) c = '\x1b[31m';
       else if (pct >= 60) c = '\x1b[38;5;208m';
       else if (pct >= 40) c = '\x1b[33m';
-      return `${c}${b}\x1b[0m`;
+      return `${c}${g} ${pct}%\x1b[0m`;
     };
 
     const reset = (epoch) => {
@@ -54,11 +56,15 @@ process.stdin.on('end', () => {
       return '\x1b[31m';                   // red: long
     };
 
+    // one cap, one ellipsis, both lines: real branch names and openspec change ids both top out
+    // around 29-31 chars ("feat/deliver-the-gated-review", "inherit-global-roles-in-overlay").
+    const trunc = (str, n = 32) => (str.length > n ? str.slice(0, n - 1) + '…' : str);
+
     const branch = (() => {
       try {
         const b = execSync('git rev-parse --abbrev-ref HEAD', { cwd, timeout: 500, encoding: 'utf8', stdio: ['pipe','pipe','pipe'] }).trim();
         if (!b || b === 'HEAD') return '';
-        let name = b.length > 22 ? b.slice(0, 20) + '..' : b;
+        let name = trunc(b);
         try {
           const [ahead, behind] = execSync('git rev-list --left-right --count HEAD...@{u}', { cwd, timeout: 500, encoding: 'utf8', stdio: ['pipe','pipe','pipe'] }).trim().split(/\s+/).map(Number);
           if (ahead) name += ` \x1b[32m↑${ahead}\x1b[0m`;
@@ -100,6 +106,94 @@ process.stdin.on('end', () => {
       } catch { return ''; }
     })();
 
+    // active OpenSpec change (the /opsx:propose → apply → archive loop). Several can be open at once —
+    // the one whose tasks.md was touched last is the one being worked. No tasks.md = proposal not expanded yet.
+    const change = (() => {
+      try {
+        let root = cwd;
+        while (!fs.existsSync(path.join(root, 'openspec', 'changes'))) {
+          const up = path.dirname(root);
+          if (up === root || root === os.homedir()) return '';
+          root = up;
+        }
+        const dir = path.join(root, 'openspec', 'changes');
+        const all = fs.readdirSync(dir, { withFileTypes: true })
+          .filter(e => e.isDirectory() && e.name !== 'archive')  // /opsx:archive moves the dir under archive/, so it drops off here on its own
+          .map(({ name: c }) => {
+            const f = path.join(dir, c, 'tasks.md');
+            try {
+              const md = fs.readFileSync(f, 'utf8');
+              const done = (md.match(/^\s*-\s*\[x\]/gim) || []).length;
+              const total = done + (md.match(/^\s*-\s*\[ \]/gm) || []).length;
+              return { c, done, total, t: fs.statSync(f).mtimeMs };
+            } catch {
+              // no tasks.md yet: proposed but not expanded. Still worth showing — otherwise a fresh
+              // /opsx:propose leaves the bar empty and the open change is invisible.
+              return { c, done: 0, total: 0, t: fs.statSync(path.join(dir, c)).mtimeMs };
+            }
+          })
+          // A change you have started outranks an expanded one, which outranks a bare proposal, so
+          // /opsx:propose can't steal the bar from the change you are mid-way through. Then
+          // most-recently-worked wins, which is the same order `openspec list` uses.
+          .sort((a, b) => Number(b.done > 0) - Number(a.done > 0) || Number(b.total > 0) - Number(a.total > 0) || b.t - a.t);
+        const best = all[0];
+        if (!best) return '';
+        const name = trunc(best.c);
+        // other open changes. Space-separated and "o"-suffixed so it can't read as arithmetic on the task count.
+        const more = all.length > 1 ? ` \x1b[38;5;245m+${all.length - 1}o\x1b[0m` : '';
+        if (!best.total) return `chg ${name} \x1b[38;5;245m·\x1b[0m${more}`;  // proposal not expanded yet
+        if (best.done === best.total) return `chg ${name} \x1b[1;32m✓\x1b[0m${more}`;  // ready to /opsx:archive
+        const pct = Math.round(100 * best.done / best.total);
+        const c = pct >= 75 ? '\x1b[38;5;114m' : pct >= 25 ? '\x1b[33m' : '\x1b[38;5;250m';
+        return `chg ${name} ${c}${best.done}/${best.total}\x1b[0m${more}`;
+      } catch { return ''; }
+    })();
+
+    // output speed: session output tokens ÷ API wait time (cost.total_api_duration_ms excludes tool/user time).
+    // The transcript writes one line per content block, all repeating the request's cumulative usage — dedupe by requestId.
+    const tps = (() => {
+      const apiMs = d.cost?.total_api_duration_ms;
+      if (!apiMs || !d.transcript_path) return '';
+      try {
+        // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
+        // seconds was by far the most expensive thing here (33ms of an 80ms render on a 12MB file).
+        // Keep a sidecar with the running total and the byte offset already counted, and read only
+        // the bytes appended since.
+        const size = fs.statSync(d.transcript_path).size;
+        const cache = path.join(os.tmpdir(), `ccs-tps-${(session || d.transcript_path).replace(/[^\w.-]+/g, '_')}.json`);
+        let st = { off: 0, sum: 0, last: '' };
+        try {
+          const prev = JSON.parse(fs.readFileSync(cache, 'utf8'));
+          if (prev.off <= size) st = prev;  // file shrank: a different transcript, so recount
+        } catch {}
+        if (size > st.off) {
+          const fd = fs.openSync(d.transcript_path, 'r');
+          const buf = Buffer.allocUnsafe(size - st.off);
+          fs.readSync(fd, buf, 0, buf.length, st.off);
+          fs.closeSync(fd);
+          const text = buf.toString('utf8');
+          const cut = text.lastIndexOf('\n') + 1;  // never consume a half-written trailing line
+          for (const line of text.slice(0, cut).split('\n')) {
+            const out = line.match(/"output_tokens":(\d+)/); // "output_tokens_details" can't match: it is followed by {
+            if (!out) continue;
+            // Every content block of one request repeats that request's cumulative usage, and a
+            // request's blocks are contiguous, so the previous id is all we need to dedupe.
+            const id = line.match(/"requestId":"([^"]+)"/)?.[1];
+            if (id) { if (id === st.last) continue; st.last = id; }
+            st.sum += Number(out[1]);
+          }
+          if (cut) {
+            st.off += cut;
+            try { fs.writeFileSync(cache, JSON.stringify(st)); } catch {}
+          }
+        }
+        if (!st.sum) return '';
+        const v = Math.round(st.sum / (apiMs / 1000));
+        const c = v >= 60 ? '\x1b[32m' : v >= 30 ? '\x1b[33m' : '\x1b[31m';
+        return `${c}${v} tok/s\x1b[0m`;
+      } catch { return ''; }
+    })();
+
     // ---- Line 1 (sections joined by |) ----
     const effortVal = typeof d.effort === 'string' ? d.effort : d.effort?.level;
     const effortColorMap = {
@@ -114,9 +208,7 @@ process.stdin.on('end', () => {
           : `${effortColorMap[effortVal.toLowerCase()] || ''}${effortVal}\x1b[0m`)
       : '';
     const dir = path.basename(cwd);
-    const L1 = [effortStr ? `${model} · ${effortStr}` : model, branch ? `${dir} · ${branch}` : dir];
-    if (task) L1.unshift(task);
-    if (d.cost?.total_lines_added != null) L1.push(`\x1b[32m+${d.cost.total_lines_added}\x1b[0m\x1b[31m-${d.cost.total_lines_removed}\x1b[0m`);
+    const L1 = [effortStr ? `${model} ${effortStr}` : model, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
     if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
       L1.push(`\x1b[36m$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
     }
@@ -124,25 +216,31 @@ process.stdin.on('end', () => {
       const mins = Math.round(d.cost.total_duration_ms / 60000);
       L1.push(`${timeColor(mins)}${mins}m\x1b[0m`);
     }
-    if (sessionCtx) L1.push(sessionCtx);
+    // The phase is the headline feature, so it leads instead of trailing five ambient segments.
+    // The in-progress todo says the same thing in the model's other words, so it is only the
+    // stand-in for a session that has not written a phase yet.
+    if (sessionCtx || task) L1.unshift(sessionCtx || `\x1b[38;5;250m${trunc(task, 48)}\x1b[0m`);
 
     // ---- Line 2 (stats joined by |) ----
     const L2 = [];
+    if (change) L2.push(change);
     const rl = d.rate_limits;
     const limitStat = (label, w) => {
       if (w?.used_percentage == null) return;
       const p = Math.round(w.used_percentage);
-      const r = reset(w.resets_at);
-      L2.push(`${label} ${bar(p)} ${p}%${r ? ` (${r})` : ''}`);
+      // "(2d)" next to a 43% limit is noise; it only becomes actionable as the limit gets close.
+      const r = p >= 60 ? reset(w.resets_at) : '';
+      L2.push(`${label} ${gauge(p)}${r ? ` \x1b[38;5;245m(${r})\x1b[0m` : ''}`);
     };
     const rem = d.context_window?.remaining_percentage;
     if (rem != null) {
-      // true share of the window, matching /context — auto-compact at 80% is signalled by bar() turning red
+      // true share of the window, matching /context — auto-compact at 80% is signalled by gauge() turning red
       const u = Math.round(Math.max(0, Math.min(100, 100 - rem)));
-      L2.push(`ctx ${bar(u)} ${u}%`);
+      L2.push(`ctx ${gauge(u)}`);
     }
     limitStat('5h', rl?.five_hour);
     limitStat('wk', rl?.seven_day);
+    if (tps) L2.push(tps);
 
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);
   } catch (e) {}
