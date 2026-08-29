@@ -127,7 +127,7 @@ run.
 
 ```
 Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | $3.12 | 55m
-chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% | wk ▆ 71% (3d)
+chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% ~2h | wk ▆ 71% ~3d
 ```
 
 | Line | Shows |
@@ -137,8 +137,24 @@ chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% | wk ▆ 71% (3d)
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
 green under 40%, yellow, orange, red at 80% (the auto-compact threshold), blinking
-red at 95%. A reset countdown only appears once that limit is past 60%, where it
-starts to matter.
+red at 95%. Each rate limit also carries a reset countdown in one unit: `~Xd`, `~Xh`,
+or `~Xm` once under an hour.
+
+### The countdown's color is the pace
+
+A percentage alone does not say whether you are in trouble: 88% of the 5-hour window is
+reassuring with 40 minutes left and a warning with 3 hours left. So the countdown is colored by
+the window's own burn rate — used share against elapsed share, no history needed — and costs no
+extra width:
+
+| Color | Means |
+|-------|-------|
+| grey `245` | on pace — this rate lands under the cap before the window resets |
+| amber | this rate hits the cap **before** the reset; slow down, switch model, or wait |
+| bold coral, at ≥95% | already spent: the countdown is no longer a warning, it is your ETA back to work |
+
+Amber needs 50% used before it can fire, so a spiky first hour does not paint the whole session
+amber, and it needs a fifth of the window elapsed before the projection means anything.
 
 The `chg` segment tracks `openspec/changes/`: `2/4` is checked tasks, `✓` means every
 box is ticked and it is ready to `/opsx:archive`, a lone `·` is a proposal whose

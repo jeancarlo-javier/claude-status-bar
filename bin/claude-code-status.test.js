@@ -57,7 +57,7 @@ const STDIN_JSON = JSON.stringify({
   cost: { total_duration_ms: 600000, total_api_duration_ms: 20000 },
 });
 
-function render() {
+function render(payload = STDIN_JSON) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN], {
       env: { ...process.env, HOME: home },
@@ -67,7 +67,7 @@ function render() {
     child.stdout.on('data', d => out += d);
     child.on('error', reject);
     child.on('close', () => resolve(out));
-    child.stdin.end(STDIN_JSON);
+    child.stdin.end(typeof payload === 'string' ? payload : JSON.stringify(payload));
   });
 }
 
@@ -150,6 +150,56 @@ async function main() {
     'health state file was created');
   assert.ok(!fs.existsSync(path.join(home, '.claude', 'health-reminders.json.activity')),
     'health activity sidecar was created');
+  // rate limits show ultra-compact reset countdown: ~3h, ~2d, and minutes ~45m when < 1h
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rlOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: {
+      five_hour: { used_percentage: 41, resets_at: nowSec + 3 * 3600 },
+      seven_day: { used_percentage: 59, resets_at: nowSec + 2 * 86400 },
+    },
+  });
+  const rlPlain = rlOut.replace(/\x1b\[[0-9;]*m/g, '');
+  assert.ok(rlPlain.includes('5h ▃ 41% ~3h'), `5h ~3h reset missing: ${JSON.stringify(rlPlain)}`);
+  assert.ok(rlPlain.includes('wk ▅ 59% ~2d'), `wk ~2d reset missing: ${JSON.stringify(rlPlain)}`);
+  assert.ok(rlOut.includes('\x1b[38;5;245m~3h\x1b[0m'), `5h reset not colored dim grey: ${JSON.stringify(rlOut)}`);
+
+  // when less than 1h remains, minutes are shown (~45m)
+  const minOut = (await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: {
+      five_hour: { used_percentage: 92, resets_at: nowSec + 45 * 60 },
+    },
+  })).replace(/\x1b\[[0-9;]*m/g, '');
+  assert.ok(minOut.includes('5h ▇ 92% ~45m'), `minutes (<1h) reset missing: ${JSON.stringify(minOut)}`);
+
+  // pace: the same 88% is grey when the window is nearly over (it will not tip) and amber when
+  // three hours remain at that burn (88% of a 5h window spent in its first 2h projects to 220%)
+  const paceOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: { five_hour: { used_percentage: 88, resets_at: nowSec + 3 * 3600 } },
+  });
+  assert.ok(paceOut.includes('\x1b[33m~3h\x1b[0m'), `off-pace reset not amber: ${JSON.stringify(paceOut)}`);
+  const onPaceOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: { five_hour: { used_percentage: 88, resets_at: nowSec + 30 * 60 } },
+  });
+  assert.ok(onPaceOut.includes('\x1b[38;5;245m~30m\x1b[0m'), `on-pace reset not grey: ${JSON.stringify(onPaceOut)}`);
+
+  // a spiky start must not paint the bar amber: under 50% used the projection is not a signal
+  const earlyOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: { five_hour: { used_percentage: 30, resets_at: nowSec + 4 * 3600 } },
+  });
+  assert.ok(earlyOut.includes('\x1b[38;5;245m~4h\x1b[0m'), `early burn should stay grey: ${JSON.stringify(earlyOut)}`);
+
+  // exhausted: the countdown stops being a warning and becomes the ETA back to work, so it leads
+  const doneOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    rate_limits: { five_hour: { used_percentage: 100, resets_at: nowSec + 80 * 60 } },
+  });
+  assert.ok(doneOut.includes('\x1b[1;38;5;203m~1h\x1b[0m'), `exhausted reset not highlighted: ${JSON.stringify(doneOut)}`);
+
   console.log('ALL TESTS PASSED');
 }
 

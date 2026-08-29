@@ -31,7 +31,7 @@ process.stdin.on('end', () => {
       return `${c}${g} ${pct}%\x1b[0m`;
     };
 
-    // "2d3h" / "4h20m" / "35m" — shared by the rate-limit reset and the phase's time-in-phase
+    // "2d3h" / "4h20m" / "35m" — time-in-phase
     const dur = (min) => {
       const h = Math.floor(min / 60), m = min % 60;
       if (h >= 24) {
@@ -40,7 +40,30 @@ process.stdin.on('end', () => {
       }
       return h > 0 ? `${h}h${m ? m + 'm' : ''}` : `${m}m`;
     };
-    const reset = (epoch) => (epoch ? dur(Math.max(0, Math.round((epoch * 1000 - Date.now()) / 60000))) : '');
+
+    const minsLeft = (epoch) => (epoch ? Math.max(0, Math.round((epoch * 1000 - Date.now()) / 60000)) : null);
+
+    // Ultra-compact rate-limit reset: "~2d" (>=24h), "~3h" (>=1h), "~45m" (<1h)
+    const reset = (min) => {
+      if (min == null) return '';
+      if (min < 60) return `~${min}m`;
+      if (min >= 1440) return `~${Math.round(min / 1440)}d`;
+      const h = Math.round(min / 60);
+      return h >= 24 ? '~1d' : `~${h}h`;
+    };
+
+    // The countdown's meaning flips with pace: 88% used is reassuring with 40m left and a warning
+    // with 3h left. Colour carries that at zero extra width. The window's own elapsed share is the
+    // burn rate — no history needed — so amber means "this pace hits the cap before it resets".
+    // Under 50% the projection is noise (a spiky first hour would paint the whole session amber),
+    // and past 95% the countdown stops being a warning and becomes the ETA back to work.
+    const RESET_GREY = '\x1b[38;5;245m';
+    const resetTone = (pct, min, windowMin) => {
+      if (pct >= 95) return '\x1b[1;38;5;203m';
+      const elapsed = windowMin - min;
+      if (pct >= 50 && elapsed >= windowMin * 0.2 && (pct * windowMin) / elapsed >= 100) return '\x1b[33m';
+      return RESET_GREY;
+    };
 
     // Animated rainbow (cycles each render)
     const rainbow = (text) => {
@@ -234,12 +257,12 @@ process.stdin.on('end', () => {
     const L2 = [];
     if (change) L2.push(change);
     const rl = d.rate_limits;
-    const limitStat = (label, w) => {
+    const limitStat = (label, w, windowMin) => {
       if (w?.used_percentage == null) return;
       const p = Math.round(w.used_percentage);
-      // "(2d)" next to a 43% limit is noise; it only becomes actionable as the limit gets close.
-      const r = p >= 60 ? reset(w.resets_at) : '';
-      L2.push(`${label} ${gauge(p)}${r ? ` \x1b[38;5;245m(${r})\x1b[0m` : ''}`);
+      const left = minsLeft(w.resets_at);
+      const r = reset(left);
+      L2.push(`${label} ${gauge(p)}${r ? ` ${resetTone(p, left, windowMin)}${r}\x1b[0m` : ''}`);
     };
     const rem = d.context_window?.remaining_percentage;
     if (rem != null) {
@@ -247,8 +270,8 @@ process.stdin.on('end', () => {
       const u = Math.round(Math.max(0, Math.min(100, 100 - rem)));
       L2.push(`ctx ${gauge(u)}`);
     }
-    limitStat('5h', rl?.five_hour);
-    limitStat('wk', rl?.seven_day);
+    limitStat('5h', rl?.five_hour, 300);
+    limitStat('wk', rl?.seven_day, 10080);
     if (tps) L2.push(tps);
 
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);
