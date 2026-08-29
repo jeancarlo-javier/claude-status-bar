@@ -257,12 +257,14 @@ process.stdin.on('end', () => {
     const L2 = [];
     if (change) L2.push(change);
     const rl = d.rate_limits;
+    // "5h~3h ▅ 62%" — the countdown rides its own label, so the two numbers that share a unit stay
+    // together ("5h window, 3h left") and the meter keeps the row's right edge for the percentages.
     const limitStat = (label, w, windowMin) => {
       if (w?.used_percentage == null) return;
       const p = Math.round(w.used_percentage);
       const left = minsLeft(w.resets_at);
       const r = reset(left);
-      L2.push(`${label} ${gauge(p)}${r ? ` ${resetTone(p, left, windowMin)}${r}\x1b[0m` : ''}`);
+      L2.push(`${label}${r ? `${resetTone(p, left, windowMin)}${r}\x1b[0m` : ''} ${gauge(p)}`);
     };
     const rem = d.context_window?.remaining_percentage;
     if (rem != null) {

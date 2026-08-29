@@ -160,8 +160,8 @@ async function main() {
     },
   });
   const rlPlain = rlOut.replace(/\x1b\[[0-9;]*m/g, '');
-  assert.ok(rlPlain.includes('5h ▃ 41% ~3h'), `5h ~3h reset missing: ${JSON.stringify(rlPlain)}`);
-  assert.ok(rlPlain.includes('wk ▅ 59% ~2d'), `wk ~2d reset missing: ${JSON.stringify(rlPlain)}`);
+  assert.ok(rlPlain.includes('5h~3h ▃ 41%'), `5h ~3h reset missing: ${JSON.stringify(rlPlain)}`);
+  assert.ok(rlPlain.includes('wk~2d ▅ 59%'), `wk ~2d reset missing: ${JSON.stringify(rlPlain)}`);
   assert.ok(rlOut.includes('\x1b[38;5;245m~3h\x1b[0m'), `5h reset not colored dim grey: ${JSON.stringify(rlOut)}`);
 
   // when less than 1h remains, minutes are shown (~45m)
@@ -171,7 +171,7 @@ async function main() {
       five_hour: { used_percentage: 92, resets_at: nowSec + 45 * 60 },
     },
   })).replace(/\x1b\[[0-9;]*m/g, '');
-  assert.ok(minOut.includes('5h ▇ 92% ~45m'), `minutes (<1h) reset missing: ${JSON.stringify(minOut)}`);
+  assert.ok(minOut.includes('5h~45m ▇ 92%'), `minutes (<1h) reset missing: ${JSON.stringify(minOut)}`);
 
   // pace: the same 88% is grey when the window is nearly over (it will not tip) and amber when
   // three hours remain at that burn (88% of a 5h window spent in its first 2h projects to 220%)

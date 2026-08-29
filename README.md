@@ -127,7 +127,7 @@ run.
 
 ```
 Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | $3.12 | 55m
-chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% ~2h | wk ▆ 71% ~3d
+chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
 ```
 
 | Line | Shows |
@@ -137,8 +137,10 @@ chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h ▃ 35% ~2h | wk ▆ 71% ~3d
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
 green under 40%, yellow, orange, red at 80% (the auto-compact threshold), blinking
-red at 95%. Each rate limit also carries a reset countdown in one unit: `~Xd`, `~Xh`,
-or `~Xm` once under an hour.
+red at 95%. Each rate limit carries its reset countdown on the label itself —
+`5h~2h` is "5-hour window, about 2 hours left" — in one unit: `~Xd`, `~Xh`, or `~Xm`
+once under an hour. Keeping the two numbers that share a unit side by side leaves the
+percentages lined up down the right of the row.
 
 ### The countdown's color is the pace
 
