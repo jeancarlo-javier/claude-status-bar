@@ -163,6 +163,17 @@ box is ticked and it is ready to `/opsx:archive`, a lone `·` is a proposal whos
 `tasks.md` does not exist yet, and `+3o` counts the other changes left open. Archiving
 one drops it on the next render.
 
+Which one, when several are open: the change this session **selected** wins — you handed its id
+to an `/opsx:` command, the model opened a file under it, or you named it in a prompt. That beats
+the change that merely looks furthest along, so one blocked at 32/34 stops holding the bar
+hostage. A command pins hard and holds until superseded; naming it any other way is soft and is
+dropped by the next message of yours that names nothing, so an aside ("blocked-one is still
+waiting on them") does not outlive itself. Command *output* never counts — an `ls` listing every
+change is not a choice. Failing any selection the phase subject decides, when it shares two words
+with an id; failing that too, the old order still answers "what looks like work in progress
+here?" — started, then expanded, then bare proposal, then most recently worked — so a fresh
+session opens on a recommendation rather than on nothing.
+
 Every segment is optional: the renderer only displays a segment when Claude Code
 supplies its data (no upstream branch, no `↑↓`; no rate-limit payload, no meters; no
 `openspec/` directory, no change). A session that has not written a phase file yet simply
@@ -186,8 +197,9 @@ Typical session: 300–800 tokens total.
 - **No network, no dependencies.** The three scripts require `fs`, `os`, `path`,
   `child_process` — nothing else. No HTTP, no telemetry, no analytics.
 - **Reads:** your phase file (contents and mtime), `openspec/changes/`
-  in the current project, your session transcript (output-token counts only, read
-  incrementally — see below), and two read-only `git` commands in the current repo.
+  in the current project, your session transcript (output-token counts, plus your prompts and the
+  model's tool inputs — that is how it tells which change is being worked; read incrementally, see
+  below), and two read-only `git` commands in the current repo.
 - **Writes:** two small per-session files under `$TMPDIR`. `ccs-tps-<session>.json` holds the
   running output-token total and the transcript offset already counted, so the renderer reads
   only the bytes appended since the last refresh instead of re-reading a transcript that grows to

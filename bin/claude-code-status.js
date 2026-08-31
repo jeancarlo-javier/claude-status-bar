@@ -97,15 +97,24 @@ process.stdin.on('end', () => {
       } catch { return ''; }
     })();
 
-    // session focus "Phase: subject" (e.g. "Exec: DB User Schema migration"), written by Claude per CLAUDE.md rule
-    const sessionCtx = (() => {
-      if (!session) return '';
+    // session focus "Phase: subject" (e.g. "Exec: DB User Schema migration"), written by Claude per CLAUDE.md rule.
+    // Read once: the phase chip renders it, and the change picker below reads the subject to tell which
+    // of several open changes is the one actually being worked.
+    const focusFile = session ? path.join(os.homedir(), '.claude', 'session-context', session) : '';
+    const focus = (() => {
+      if (!focusFile) return '';
       try {
-        const f = path.join(os.homedir(), '.claude', 'session-context', session);
-        const buf = fs.readFileSync(f);
+        const buf = fs.readFileSync(focusFile);
         // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
-        const t = trunc((buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
-          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1'), 48);
+        return (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
+          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
+      } catch { return ''; }
+    })();
+    const sessionCtx = (() => {
+      if (!focus) return '';
+      try {
+        const f = focusFile;
+        const t = trunc(focus, 48);
         // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
         const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, 'review-plan': 141, exec: 220,
                         'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
@@ -140,6 +149,113 @@ process.stdin.on('end', () => {
       } catch { return ''; }
     })();
 
+    // A selection is remembered without discarding the one before it. `/opsx:propose new-id` is
+    // recorded before it creates its directory, and dropping the change you were on the moment that
+    // unresolvable id arrives would leave the bar showing an unrelated one for the whole proposal.
+    const keep = (st, id) => { st.hist = [id, ...st.hist.filter(x => x !== id)].slice(0, 3); st.pro = ''; };
+    const last = (s, re) => {           // last match wins: a later selection supersedes an earlier one
+      let hit = '';
+      for (const m of s.matchAll(re)) { const id = m[1] || m[2]; if (id && id !== 'archive') hit = id; }
+      return hit;
+    };
+    // An instruction naming a change. ["'\\]* rather than "?: a quoted argument reaches here through
+    // JSON.stringify, so what precedes the id is `\"`, not `"`.
+    const cmdChange = s => last(s, /--change[\s=]+["'\\]*([a-z0-9][\w.-]*)|\/opsx:\w+\s+["'\\]*([a-z0-9][\w.-]*)/gi);
+    // A file inside the change's own directory.
+    const pathChange = s => last(s, /openspec\/changes\/([a-z0-9][\w.-]*)\//gi);
+    // Prose naming a change ("sigo con landing-tracking-parity"). Only when the message names
+    // exactly one candidate — "apply landing-tracking-parity, fix-phpstan is still blocked" names
+    // two, and there the last one mentioned is precisely the wrong answer.
+    const soleChange = s => {
+      const seen = new Set();
+      for (const m of s.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/g)) if (m[0] !== 'archive') seen.add(m[0]);
+      return seen.size === 1 ? [...seen][0] : '';
+    };
+
+    // One incremental pass over the transcript, answering two things: how many output tokens this
+    // session has produced (rendered as tok/s below), and which OpenSpec change it is actually
+    // working — the only signal that says which change is *being worked* rather than which one
+    // looks furthest along or was written to last by anything at all.
+    //
+    // Records are parsed, not pattern-matched over the raw line, because one line carries several
+    // content blocks and the difference between them is the entire point: a path in a tool_use
+    // input is the model deliberately opening that change, while the identical path in a
+    // tool_result is an `ls` listing every change there is — which handed the bar whichever id
+    // happened to sort last. Parsing a whole 16.7MB transcript costs 12ms against 5ms for a regex,
+    // and only on the first render of a resumed session; every later render sees ~2KB.
+    const scan = (() => {
+      const st = { off: 0, sum: 0, last: '', hist: [], pro: '' };
+      if (!d.transcript_path) return st;
+      try {
+        // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
+        // seconds was by far the most expensive thing here (33ms of an 80ms render on a 12MB file).
+        // Keep a sidecar with the running totals and the byte offset already counted, and read only
+        // the bytes appended since.
+        const size = fs.statSync(d.transcript_path).size;
+        const cache = path.join(os.tmpdir(), `ccs-tps-${(session || d.transcript_path).replace(/[^\w.-]+/g, '_')}.json`);
+        try {
+          const prev = JSON.parse(fs.readFileSync(cache, 'utf8'));
+          if (prev.off <= size) Object.assign(st, prev);  // file shrank: a different transcript, so recount
+        } catch {}
+        if (size > st.off) {
+          const fd = fs.openSync(d.transcript_path, 'r');
+          const buf = Buffer.allocUnsafe(size - st.off);
+          fs.readSync(fd, buf, 0, buf.length, st.off);
+          fs.closeSync(fd);
+          const text = buf.toString('utf8');
+          const cut = text.lastIndexOf('\n') + 1;  // never consume a half-written trailing line
+          for (const line of text.slice(0, cut).split('\n')) {
+            const out = line.match(/"output_tokens":(\d+)/); // "output_tokens_details" can't match: it is followed by {
+            if (out) {
+              // Every content block of one request repeats that request's cumulative usage, and a
+              // request's blocks are contiguous, so the previous id is all we need to dedupe.
+              const rid = line.match(/"requestId":"([^"]+)"/)?.[1];
+              if (!rid || rid !== st.last) { if (rid) st.last = rid; st.sum += Number(out[1]); }
+            }
+            let o;
+            try { o = JSON.parse(line); } catch { continue; }
+            // isMeta is the harness talking to the model (hook output, reminders); isSidechain is a
+            // subagent. Neither one is you choosing a change to work on.
+            if (o.isMeta || o.isSidechain || !o.message) continue;
+            const c = o.message.content;
+            const blocks = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
+            // Deliberate inputs only. A tool_result is command *output* — that is where a listing of
+            // every open change lives — and assistant prose names changes while merely discussing
+            // them, the way this comment does. Neither may move the pin.
+            if (o.message.role === 'user') {
+              // Judge the message, not each block: a turn arrives as the prompt plus whatever
+              // system-reminders rode along with it, and reading those separately would let a
+              // reminder with no id in it wipe the id the prompt just gave.
+              const t = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n');
+              if (!t) continue;                              // tool results only — not a turn of yours
+              const cmd = cmdChange(t);
+              // A command names the change to work on and holds until superseded. Naming one any
+              // other way is softer than that: a path pasted out of a stack trace, or a change
+              // mentioned in passing ("blocked-one is still waiting on them"), is worth following
+              // for now but must not outlive the aside. So it is dropped by the next thing you say
+              // that names nothing — which is what the unconditional assignment below does.
+              if (cmd) keep(st, cmd); else st.pro = pathChange(t) || soleChange(t);
+            } else {
+              for (const b of blocks) {
+                if (b.type !== 'tool_use') continue;
+                const s = JSON.stringify(b.input ?? '');
+                const id = cmdChange(s) || pathChange(s);     // the model actually opened it or ran it
+                if (id) keep(st, id);
+              }
+            }
+            // Ids are kept without checking that the directory exists: `/opsx:propose new-id` is
+            // scanned before the directory it creates, and these bytes are never read twice.
+            // Whether one is real is settled where the change is picked, on every render.
+          }
+          if (cut) {
+            st.off += cut;
+            try { fs.writeFileSync(cache, JSON.stringify(st)); } catch {}
+          }
+        }
+      } catch {}
+      return st;
+    })();
+
     // active OpenSpec change (the /opsx:propose → apply → archive loop). Several can be open at once —
     // the one whose tasks.md was touched last is the one being worked. No tasks.md = proposal not expanded yet.
     const change = (() => {
@@ -151,7 +267,25 @@ process.stdin.on('end', () => {
           root = up;
         }
         const dir = path.join(root, 'openspec', 'changes');
-        const all = fs.readdirSync(dir, { withFileTypes: true })
+        // The change you are furthest through is not always the change you are on: one that is blocked
+        // on someone else sits at 32/34 forever and keeps out-ranking the one you switched to. Two
+        // signals say which one you actually mean, strongest first.
+        const fw = new Set(focus.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2));
+        const score = (id, sel) => {
+          // 1. this session selected it — opened one of its files, handed its id to an openspec or
+          // /opsx command, or you named it in a prompt. Evidence, not a guess. The soft pin, when
+          // one is standing, is by construction the more recent of the two. Checking either against
+          // the directories that exist right now is also what makes it safe to record an id before
+          // its directory is there: an id that never becomes real simply never scores.
+          if (id && id === sel) return 100;
+          // 2. the focus line names it. Word overlap, not equality — survives the id's dashes, any
+          // word order, and a subject that paraphrases ("Exec: landing tracking parity"). Two words
+          // minimum, so a shared "fix" or "add" cannot hijack the pick. Only a fallback: the phase
+          // subject moves with the task at hand and often has nothing to do with any change id.
+          const n = id.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && fw.has(w)).length;
+          return n > 1 ? n : 0;
+        };
+        const open = fs.readdirSync(dir, { withFileTypes: true })
           .filter(e => e.isDirectory() && e.name !== 'archive')  // /opsx:archive moves the dir under archive/, so it drops off here on its own
           .map(({ name: c }) => {
             const f = path.join(dir, c, 'tasks.md');
@@ -166,10 +300,19 @@ process.stdin.on('end', () => {
               return { c, done: 0, total: 0, t: fs.statSync(path.join(dir, c)).mtimeMs };
             }
           })
-          // A change you have started outranks an expanded one, which outranks a bare proposal, so
-          // /opsx:propose can't steal the bar from the change you are mid-way through. Then
-          // most-recently-worked wins, which is the same order `openspec list` uses.
-          .sort((a, b) => Number(b.done > 0) - Number(a.done > 0) || Number(b.total > 0) - Number(a.total > 0) || b.t - a.t);
+          // The change the focus line names wins outright. Failing that, a change you have started
+          // outranks an expanded one, which outranks a bare proposal, so /opsx:propose can't steal the
+          // bar from the change you are mid-way through. Then most-recently-worked wins, which is the
+          // same order `openspec list` uses.
+          ;
+        // Resolving against the directories that exist right now is what makes it safe to have
+        // recorded an id before its directory was there: an id that is not real yet is skipped,
+        // and the selection before it still stands until it becomes real.
+        const ids = new Set(open.map(c => c.c));
+        const sel = (scan.pro && ids.has(scan.pro)) ? scan.pro : scan.hist.find(id => ids.has(id)) || '';
+        const all = open
+          .map(c => ({ ...c, f: score(c.c, sel) }))
+          .sort((a, b) => b.f - a.f || Number(b.done > 0) - Number(a.done > 0) || Number(b.total > 0) - Number(a.total > 0) || b.t - a.t);
         const best = all[0];
         if (!best) return '';
         const name = trunc(best.c);
@@ -184,48 +327,14 @@ process.stdin.on('end', () => {
     })();
 
     // output speed: session output tokens ÷ API wait time (cost.total_api_duration_ms excludes tool/user time).
-    // The transcript writes one line per content block, all repeating the request's cumulative usage — dedupe by requestId.
+    // The transcript writes one line per content block, all repeating the request's cumulative usage —
+    // deduped by requestId in the scan above, which is where the reading and counting happens.
     const tps = (() => {
       const apiMs = d.cost?.total_api_duration_ms;
-      if (!apiMs || !d.transcript_path) return '';
-      try {
-        // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
-        // seconds was by far the most expensive thing here (33ms of an 80ms render on a 12MB file).
-        // Keep a sidecar with the running total and the byte offset already counted, and read only
-        // the bytes appended since.
-        const size = fs.statSync(d.transcript_path).size;
-        const cache = path.join(os.tmpdir(), `ccs-tps-${(session || d.transcript_path).replace(/[^\w.-]+/g, '_')}.json`);
-        let st = { off: 0, sum: 0, last: '' };
-        try {
-          const prev = JSON.parse(fs.readFileSync(cache, 'utf8'));
-          if (prev.off <= size) st = prev;  // file shrank: a different transcript, so recount
-        } catch {}
-        if (size > st.off) {
-          const fd = fs.openSync(d.transcript_path, 'r');
-          const buf = Buffer.allocUnsafe(size - st.off);
-          fs.readSync(fd, buf, 0, buf.length, st.off);
-          fs.closeSync(fd);
-          const text = buf.toString('utf8');
-          const cut = text.lastIndexOf('\n') + 1;  // never consume a half-written trailing line
-          for (const line of text.slice(0, cut).split('\n')) {
-            const out = line.match(/"output_tokens":(\d+)/); // "output_tokens_details" can't match: it is followed by {
-            if (!out) continue;
-            // Every content block of one request repeats that request's cumulative usage, and a
-            // request's blocks are contiguous, so the previous id is all we need to dedupe.
-            const id = line.match(/"requestId":"([^"]+)"/)?.[1];
-            if (id) { if (id === st.last) continue; st.last = id; }
-            st.sum += Number(out[1]);
-          }
-          if (cut) {
-            st.off += cut;
-            try { fs.writeFileSync(cache, JSON.stringify(st)); } catch {}
-          }
-        }
-        if (!st.sum) return '';
-        const v = Math.round(st.sum / (apiMs / 1000));
-        const c = v >= 60 ? '\x1b[32m' : v >= 30 ? '\x1b[33m' : '\x1b[31m';
-        return `${c}${v} tok/s\x1b[0m`;
-      } catch { return ''; }
+      if (!apiMs || !scan.sum) return '';
+      const v = Math.round(scan.sum / (apiMs / 1000));
+      const c = v >= 60 ? '\x1b[32m' : v >= 30 ? '\x1b[33m' : '\x1b[31m';
+      return `${c}${v} tok/s\x1b[0m`;
     })();
 
     // ---- Line 1 (sections joined by |) ----

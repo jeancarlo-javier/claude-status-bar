@@ -200,6 +200,77 @@ async function main() {
   });
   assert.ok(doneOut.includes('\x1b[1;38;5;203m~1h\x1b[0m'), `exhausted reset not highlighted: ${JSON.stringify(doneOut)}`);
 
+  // ── which change is being worked ───────────────────────────────────────────────────────────
+  // A change blocked on someone else sits at 32/34 forever and outranks the one you switched to,
+  // because "has a checked task" is a binary key. The transcript settles it: what the session
+  // deliberately selected wins over what merely looks furthest along.
+  fs.mkdirSync(path.join(chg, 'blocked-change'), { recursive: true });
+  fs.writeFileSync(path.join(chg, 'blocked-change', 'tasks.md'), '- [x] a\n- [x] b\n- [ ] c\n');
+  fs.mkdirSync(path.join(chg, 'fresh-change'), { recursive: true });
+  fs.writeFileSync(path.join(chg, 'fresh-change', 'tasks.md'), '- [ ] a\n- [ ] b\n');
+  fs.utimesSync(path.join(chg, 'fresh-change', 'tasks.md'), new Date(0), new Date(0));
+
+  const say = (...lines) => fs.appendFileSync(transcript, lines.join('\n') + '\n');
+  const chgSeg = async () => (await render()).replace(/\x1b\[[0-9;]*m/g, '')
+    .split('\n')[1].match(/chg (\S+)/)?.[1];
+  const userMsg = (text, extra = '') => `{"type":"user"${extra},"message":{"role":"user","content":${JSON.stringify(text)}}}`;
+  const toolUse = (input) => `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","input":${JSON.stringify(input)}}]}}`;
+
+  // progress alone: the blocked change wins, which is the bug
+  assert.equal(await chgSeg(), 'blocked-change', 'baseline: furthest-along change should lead');
+
+  // an `ls` listing every change is tool *output* — it must not select anything
+  say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"openspec/changes/fresh-change/\\nopenspec/changes/blocked-change/"}]}}`);
+  assert.equal(await chgSeg(), 'blocked-change', 'a tool_result listing moved the pin');
+
+  // opening one of its files does
+  say(toolUse({ file_path: '/repo/openspec/changes/fresh-change/tasks.md' }));
+  assert.equal(await chgSeg(), 'fresh-change', 'opening a change file did not select it');
+
+  // a subagent's picks belong to the subagent, and isMeta is the harness talking, not you
+  say(toolUse({ file_path: '/repo/openspec/changes/blocked-change/tasks.md' }).replace('{"type":"assistant"', '{"type":"assistant","isSidechain":true'));
+  say(userMsg('/opsx:apply blocked-change', ',"isMeta":true'));
+  assert.equal(await chgSeg(), 'fresh-change', 'a sidechain or meta record moved the pin');
+
+  // one line, two blocks: skipping the whole line because it holds a tool_result would lose the ask
+  say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"noise"},{"type":"text","text":"/opsx:apply blocked-change"}]}}`);
+  assert.equal(await chgSeg(), 'blocked-change', 'text block alongside a tool_result was dropped');
+
+  // naming exactly one change selects it
+  say(userMsg('sigo con fresh-change'));
+  assert.equal(await chgSeg(), 'fresh-change', 'prose naming one change did not select it');
+
+  // A command is the selection and holds; naming a change any other way is an aside that must not
+  // outlive itself. So an aside follows, and then the next thing said drops it again.
+  say(userMsg('/opsx:apply fresh-change'));
+  say(userMsg('por cierto, blocked-change sigue esperando al otro equipo'));
+  assert.equal(await chgSeg(), 'blocked-change', 'a change named in passing was not followed');
+  say(userMsg('vale, sigue con lo del tracking entonces'));
+  assert.equal(await chgSeg(), 'fresh-change', 'the aside outlived the message that made it');
+
+  // naming two at once is ambiguous: it selects neither, and leaves the command standing
+  say(userMsg('apply fresh-change; blocked-change sigue bloqueado'));
+  assert.equal(await chgSeg(), 'fresh-change', 'prose naming two changes picked one anyway');
+
+  // the id a workflow command was handed, even with no path in sight
+  say(toolUse({ command: 'openspec status --change "blocked-change" --json' }));
+  assert.equal(await chgSeg(), 'blocked-change', '--change did not select the change');
+
+  // /opsx:propose is scanned before it creates the directory, and these bytes are never re-read:
+  // the id has to survive not existing yet
+  // until it exists it cannot be selected, and the change you were on has to stay put meanwhile
+  say(userMsg('/opsx:propose later-change'));
+  assert.equal(await chgSeg(), 'blocked-change', 'an id with no directory should not select');
+  assert.equal(await chgSeg(), 'blocked-change', 'a proposal in flight dropped the change being worked');
+  fs.mkdirSync(path.join(chg, 'later-change'), { recursive: true });
+  fs.writeFileSync(path.join(chg, 'later-change', 'tasks.md'), '- [ ] a\n');
+  assert.equal(await chgSeg(), 'later-change', 'the id was forgotten before its directory appeared');
+
+  // a prefix is not a match: selecting "later-change" must not be read as selecting "later-change-2"
+  fs.mkdirSync(path.join(chg, 'later-change-2'), { recursive: true });
+  fs.writeFileSync(path.join(chg, 'later-change-2', 'tasks.md'), '- [x] a\n- [ ] b\n');
+  assert.equal(await chgSeg(), 'later-change', 'a longer id sharing the prefix stole the selection');
+
   console.log('ALL TESTS PASSED');
 }
 
