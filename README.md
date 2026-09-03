@@ -7,7 +7,8 @@
 Two-line Claude Code status line. The headline feature: the session's live **workflow
 phase** (`Plan:`, `Exec:`, `Verify:`, …) and its subject, color-coded and rewritten by the
 model itself as the work progresses. The rest is the session context you want on screen
-anyway.
+anyway. When the local OMP model catalog supplies a score, the model segment adds
+`[effort·intelligence]`; only `medium` is shortened, to `med`.
 
 ![status line showing the session phase](assets/statusline.png)
 

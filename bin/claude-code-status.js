@@ -345,21 +345,129 @@ process.stdin.on('end', () => {
       return `${c}${valStr} tok/s\x1b[0m`;
     })();
 
+    // ---- Intelligence score lookup and coloring ----
+    const colorIntelligence = (score) => {
+      if (score == null || !Number.isFinite(score)) return '';
+      const s = Math.round(score);
+      let c = '\x1b[38;5;245m'; // < 20: Economy / fast (muted slate grey)
+      if (s >= 60)      c = '\x1b[38;5;201m'; // >= 60: Next-Gen Reasoning (Magenta)
+      else if (s >= 50) c = '\x1b[38;5;51m';  // 50-59: Cutting-Edge Frontier (Electric Cyan)
+      else if (s >= 35) c = '\x1b[38;5;114m'; // 35-49: Flagship Reasoning (Emerald Green)
+      else if (s >= 20) c = '\x1b[38;5;220m'; // 20-34: Balanced Mid-tier (Amber Gold)
+      return `${c}${s}\x1b[0m`;
+    };
+
+    const getModelIntelligence = (modelId, modelName) => {
+      const dbPath = path.join(os.homedir(), '.omp', 'agent', 'models.db');
+      const cachePath = path.join(os.tmpdir(), 'claude-model-int-cache.json');
+      let map = null;
+
+      if (fs.existsSync(cachePath)) {
+        try {
+          const cacheMtime = fs.statSync(cachePath).mtimeMs;
+          const dbMtime = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : 0;
+          if (cacheMtime >= dbMtime) {
+            map = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+          }
+        } catch {}
+      }
+
+      if (!map && fs.existsSync(dbPath)) {
+        map = {};
+        try {
+          const { DatabaseSync } = require('node:sqlite');
+          const db = new DatabaseSync(dbPath, { readOnly: true });
+          const rows = db.prepare('SELECT models FROM model_cache').all();
+          for (const r of rows) {
+            try {
+              const list = JSON.parse(r.models);
+              for (const m of list) {
+                if (typeof m.int === 'number' && Number.isFinite(m.int)) {
+                  const bareId = m.id.includes('/') ? m.id.split('/').pop() : m.id;
+                  const cleanId = bareId.replace(/\[.*?\]/g, '').replace(/:thinking.*?$/g, '').trim().toLowerCase();
+                  map[m.id.toLowerCase()] = m.int;
+                  map[bareId.toLowerCase()] = m.int;
+                  map[cleanId] = m.int;
+                  if (m.name) {
+                    map[m.name.toLowerCase()] = m.int;
+                    map[m.name.toLowerCase().replace(/\s*\([^)]*\)\s*$/, '')] = m.int;
+                  }
+                }
+              }
+            } catch {}
+          }
+          db.close();
+          try { fs.writeFileSync(cachePath, JSON.stringify(map)); } catch {}
+        } catch {}
+      }
+
+      if (!map) return null;
+
+      const clean = (s) => (s || '').replace(/\[.*?\]/g, '').replace(/:thinking.*?$/g, '').replace(/^.*?\//, '').trim().toLowerCase();
+      if (modelId) {
+        const val = map[modelId.toLowerCase()] ?? map[clean(modelId)];
+        if (val !== undefined) return val;
+      }
+      if (modelName) {
+        const val = map[modelName.toLowerCase()] ?? map[clean(modelName)];
+        if (val !== undefined) return val;
+      }
+      return null;
+    };
+
     // ---- Line 1 (sections joined by |) ----
-    const effortVal = typeof d.effort === 'string' ? d.effort : d.effort?.level;
+    const rawEffort = (typeof d.effort === 'string' ? d.effort : d.effort?.level || '').toLowerCase();
+    const effortDisplayMap = {
+      minimal: 'minimal',
+      min: 'minimal',
+      lo: 'low',
+      low: 'low',
+      med: 'med',
+      medium: 'med',
+      mid: 'med',
+      hi: 'high',
+      high: 'high',
+      xhi: 'xhigh',
+      xhigh: 'xhigh',
+      'extra-high': 'xhigh',
+      max: 'max',
+      maximum: 'max',
+      auto: 'auto',
+    };
     const effortColorMap = {
+      minimal: '\x1b[38;5;245m',
       low: '\x1b[38;2;245;195;68m',                 // #F5C344 amber yellow
-      medium: '\x1b[38;2;108;184;110m',             // #6CB86E emerald green
+      med: '\x1b[38;2;108;184;110m',                 // #6CB86E emerald green
       high: '\x1b[38;2;179;185;244m',               // #B3B9F4 lavender
       xhigh: '\x1b[38;2;179;136;244m',              // #B388F4 lavender purple
     };
-    const effortStr = effortVal
-      ? (effortVal.toLowerCase() === 'max'
-          ? rainbow(effortVal)
-          : `${effortColorMap[effortVal.toLowerCase()] || ''}${effortVal}\x1b[0m`)
+    const effortShort = effortDisplayMap[rawEffort] || rawEffort;
+    const effortStr = effortShort
+      ? (effortShort === 'max'
+          ? rainbow('max')
+          : `${effortColorMap[effortShort] || '\x1b[38;5;245m'}${effortShort}\x1b[0m`)
       : '';
+
+    const intScore = getModelIntelligence(d.model?.id, d.model?.display_name || model);
+    const intStr = intScore != null ? colorIntelligence(intScore) : '';
+
+    const ob = '\x1b[38;5;245m[\x1b[0m';
+    const cb = '\x1b[38;5;245m]\x1b[0m';
+    const dot = '\x1b[38;5;245m·\x1b[0m';
+
+    let tag = '';
+    if (effortStr && intStr) {
+      tag = `${ob}${effortStr}${dot}${intStr}${cb}`;
+    } else if (intStr) {
+      tag = `${ob}${intStr}${cb}`;
+    } else if (effortStr) {
+      tag = `${ob}${effortStr}${cb}`;
+    }
+
+    const modelIndicator = tag ? `${model} ${tag}` : model;
+
     const dir = path.basename(cwd);
-    const L1 = [effortStr ? `${model} ${effortStr}` : model, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
+    const L1 = [modelIndicator, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
     if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
       L1.push(`${costColor(d.cost.total_cost_usd)}$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
     }

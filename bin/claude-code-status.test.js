@@ -306,6 +306,31 @@ async function main() {
   fs.writeFileSync(path.join(chg, 'later-change-2', 'tasks.md'), '- [x] a\n- [ ] b\n');
   assert.equal(await chgSeg(), 'later-change', 'a longer id sharing the prefix stole the selection');
 
+
+  // intelligence score + effort formatting: e.g. "Gemini 3.7 Flash [high·56]"
+  const intRender = await render({
+    ...JSON.parse(STDIN_JSON),
+    model: { id: 'gemini-3.7-flash', display_name: 'Gemini 3.7 Flash' },
+    effort: 'high',
+  });
+  const intPlain = intRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  assert.ok(intPlain.includes('Gemini 3.7 Flash [high·56]'), `intelligence badge missing: ${JSON.stringify(intPlain)}`);
+  assert.ok(intRender.includes('\x1b[38;5;51m56\x1b[0m'), `frontier intelligence score not electric cyan: ${JSON.stringify(intRender)}`);
+
+  // only medium is shortened: medium -> med
+  const medRender = await render({
+    ...JSON.parse(STDIN_JSON),
+    model: { id: 'gemini-3.7-flash', display_name: 'Gemini 3.7 Flash' },
+    effort: 'medium',
+  });
+  assert.ok(medRender.includes('Gemini 3.7 Flash \x1b[38;5;245m[\x1b[0m\x1b[38;2;108;184;110mmed\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;51m56\x1b[0m\x1b[38;5;245m]\x1b[0m'), 'medium was not abbreviated to med');
+
+  const xhighRender = await render({
+    ...JSON.parse(STDIN_JSON),
+    model: { id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6' },
+    effort: 'xhigh',
+  });
+  assert.ok(xhighRender.includes('Claude Opus 4.6 \x1b[38;5;245m[\x1b[0m\x1b[38;2;179;136;244mxhigh\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;114m39\x1b[0m\x1b[38;5;245m]\x1b[0m'), 'xhigh was unexpectedly abbreviated');
   console.log('ALL TESTS PASSED');
 }
 

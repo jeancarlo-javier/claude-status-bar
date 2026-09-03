@@ -18,7 +18,7 @@ const ROOT = path.join(__dirname, '..');
 const out = path.join(ROOT, 'assets', 'statusline.svg');
 
 const PAYLOAD = {
-  model: { display_name: 'Opus 5 (1M context)' },
+  model: { id: 'claude-opus-5', display_name: 'Opus 5 (1M context)' },
   effort: 'xhigh',
   session_id: 'screenshot',
   workspace: { current_dir: null },   // filled in with a throwaway demo project below
