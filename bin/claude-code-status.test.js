@@ -159,6 +159,25 @@ async function main() {
   });
   assert.ok(slowOut.includes('\x1b[31m18.5 tok/s\x1b[0m'), `slow tok/s not red: ${JSON.stringify(slowOut)}`);
 
+  // cost color thresholds: green $0..$3, yellow $3..$6, red > $6
+  const cheapCostOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_cost_usd: 2.50, total_duration_ms: 600000 },
+  });
+  assert.ok(cheapCostOut.includes('\x1b[32m$2.50\x1b[0m'), `cheap cost not green: ${JSON.stringify(cheapCostOut)}`);
+
+  const medCostOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_cost_usd: 4.50, total_duration_ms: 600000 },
+  });
+  assert.ok(medCostOut.includes('\x1b[33m$4.50\x1b[0m'), `moderate cost not yellow: ${JSON.stringify(medCostOut)}`);
+
+  const expCostOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_cost_usd: 8.50, total_duration_ms: 600000 },
+  });
+  assert.ok(expCostOut.includes('\x1b[31m$8.50\x1b[0m'), `expensive cost not red: ${JSON.stringify(expCostOut)}`);
+
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
   }

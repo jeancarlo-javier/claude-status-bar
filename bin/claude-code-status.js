@@ -79,6 +79,13 @@ process.stdin.on('end', () => {
       return '\x1b[31m';                   // red: long
     };
 
+    // Cost color thresholds: cheap ($0–$3), moderate ($3–$6), expensive (> $6)
+    const costColor = (cost) => {
+      if (cost < 3.00) return '\x1b[32m';   // green: cheap ($0–$3)
+      if (cost <= 6.00) return '\x1b[33m';  // yellow: moderate ($3–$6)
+      return '\x1b[31m';                    // red: expensive (> $6)
+    };
+
     // one cap, one ellipsis, both lines: real branch names and openspec change ids both top out
     // around 29-31 chars ("feat/deliver-the-gated-review", "inherit-global-roles-in-overlay").
     const trunc = (str, n = 32) => (str.length > n ? str.slice(0, n - 1) + '…' : str);
@@ -354,7 +361,7 @@ process.stdin.on('end', () => {
     const dir = path.basename(cwd);
     const L1 = [effortStr ? `${model} ${effortStr}` : model, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
     if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
-      L1.push(`\x1b[36m$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
+      L1.push(`${costColor(d.cost.total_cost_usd)}$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
     }
     if (d.cost?.total_duration_ms != null) {
       const mins = Math.round(d.cost.total_duration_ms / 60000);
