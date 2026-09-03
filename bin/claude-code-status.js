@@ -332,9 +332,10 @@ process.stdin.on('end', () => {
     const tps = (() => {
       const apiMs = d.cost?.total_api_duration_ms;
       if (!apiMs || !scan.sum) return '';
-      const v = Math.round(scan.sum / (apiMs / 1000));
+      const v = scan.sum / (apiMs / 1000);
+      const valStr = v >= 100 || v % 1 === 0 ? Math.round(v) : v.toFixed(1);
       const c = v >= 60 ? '\x1b[32m' : v >= 30 ? '\x1b[33m' : '\x1b[31m';
-      return `${c}${v} tok/s\x1b[0m`;
+      return `${c}${valStr} tok/s\x1b[0m`;
     })();
 
     // ---- Line 1 (sections joined by |) ----

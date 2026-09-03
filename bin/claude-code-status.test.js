@@ -38,7 +38,7 @@ fs.mkdirSync(path.join(chg, 'bare-proposal'), { recursive: true });
 fs.writeFileSync(path.join(chg, 'bare-proposal', 'proposal.md'), '# p\n');
 
 // the phase segment reads ~/.claude/session-context/<session_id>, and its mtime is the age shown
-const SESSION = 'sess-test';
+const SESSION = 'sess-test-' + Date.now();
 const phaseFile = path.join(home, '.claude', 'session-context', SESSION);
 fs.mkdirSync(path.dirname(phaseFile), { recursive: true });
 const setPhase = (text, minutesAgo = 0) => {
@@ -136,12 +136,28 @@ async function main() {
 
   // 1200 output tokens / 20s of API time = 60 tok/s, last stat on line 2
   assert.ok(line2.endsWith('60 tok/s'), `tok/s missing from end of line 2: ${JSON.stringify(plain)}`);
+  assert.ok(out.includes('\x1b[32m60 tok/s\x1b[0m'), `fast tok/s not green: ${JSON.stringify(out)}`);
 
   // tok/s is counted incrementally: the next render must read only the appended bytes and still
   // reach 2000/20s = 100, proving the sidecar carries the running total rather than recounting.
   fs.appendFileSync(transcript, '{"requestId":"req_c","message":{"usage":{"output_tokens":800}}}\n');
-  const grown = (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
+  const grownOut = await render();
+  const grown = grownOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
   assert.ok(grown.endsWith('100 tok/s'), `incremental tok/s did not pick up the append: ${JSON.stringify(grown)}`);
+  assert.ok(grownOut.includes('\x1b[32m100 tok/s\x1b[0m'), `100 tok/s not green: ${JSON.stringify(grownOut)}`);
+
+  // tok/s color thresholds: green >= 60, yellow 30..59, red < 30 (with decimals like 18.5)
+  const medOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_duration_ms: 600000, total_api_duration_ms: 2000000 / 45 }, // 2000 tokens / (44.44s) = 45 tok/s
+  });
+  assert.ok(medOut.includes('\x1b[33m45 tok/s\x1b[0m'), `medium tok/s not yellow: ${JSON.stringify(medOut)}`);
+
+  const slowOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_duration_ms: 600000, total_api_duration_ms: 2000000 / 18.5 }, // 2000 tokens / (108.1s) = 18.5 tok/s
+  });
+  assert.ok(slowOut.includes('\x1b[31m18.5 tok/s\x1b[0m'), `slow tok/s not red: ${JSON.stringify(slowOut)}`);
 
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
@@ -276,4 +292,8 @@ async function main() {
 
 main()
   .catch(err => { console.error(err); process.exitCode = 1; })
-  .finally(() => fs.rmSync(home, { recursive: true, force: true }));
+  .finally(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-phase-${SESSION}.json`)); } catch {}
+    try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${SESSION}.json`)); } catch {}
+  });
