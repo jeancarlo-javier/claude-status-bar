@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "claude-status-bar",
   "displayName": "claude-status-bar",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Two-line status line whose headline feature is the session's live workflow phase (Plan, Exec, Verify, Done), rewritten by the model itself at each transition",
   "author": {
     "name": "Jeancarlo Javier",

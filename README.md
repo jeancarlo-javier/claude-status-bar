@@ -127,14 +127,14 @@ run.
 ## What the two lines show
 
 ```
-Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | $3.12 | 55m
-chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
+Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | 55m
+$3.12 | chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), session cost, elapsed minutes |
-| 2 | the OpenSpec change being worked and its task progress, context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
+| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), elapsed minutes |
+| 2 | session cost first, then the OpenSpec change being worked and its task progress, context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
 green under 40%, yellow, orange, red at 80% (the auto-compact threshold), blinking

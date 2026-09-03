@@ -178,6 +178,9 @@ async function main() {
   });
   assert.ok(expCostOut.includes('\x1b[31m$8.50\x1b[0m'), `expensive cost not red: ${JSON.stringify(expCostOut)}`);
 
+  const [cheapL1, cheapL2] = cheapCostOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n');
+  assert.ok(!cheapL1.includes('$2.50'), `cost should not be in line 1: ${JSON.stringify(cheapL1)}`);
+  assert.ok(cheapL2.startsWith('$2.50'), `cost must be the first element of line 2: ${JSON.stringify(cheapL2)}`);
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
   }
@@ -331,6 +334,14 @@ async function main() {
     effort: 'xhigh',
   });
   assert.ok(xhighRender.includes('Claude Opus 4.6 \x1b[38;5;245m[\x1b[0m\x1b[38;2;179;136;244mxhigh\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;114m39\x1b[0m\x1b[38;5;245m]\x1b[0m'), 'xhigh was unexpectedly abbreviated');
+
+  const haikuRender = await render({
+    ...JSON.parse(STDIN_JSON),
+    model: { id: 'claude-haiku-4-5', display_name: 'Claude Haiku 4.5' },
+    effort: 'high',
+  });
+  const haikuPlain = haikuRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  assert.ok(haikuPlain.includes('Claude Haiku 4.5 [high·30]'), `Haiku 4.5 intelligence score missing: ${JSON.stringify(haikuPlain)}`);
   console.log('ALL TESTS PASSED');
 }
 

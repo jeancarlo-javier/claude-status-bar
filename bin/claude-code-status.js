@@ -401,18 +401,28 @@ process.stdin.on('end', () => {
         } catch {}
       }
 
-      if (!map) return null;
-
       const clean = (s) => (s || '').replace(/\[.*?\]/g, '').replace(/:thinking.*?$/g, '').replace(/^.*?\//, '').trim().toLowerCase();
-      if (modelId) {
-        const val = map[modelId.toLowerCase()] ?? map[clean(modelId)];
-        if (val !== undefined) return val;
+      if (map) {
+        if (modelId) {
+          const val = map[modelId.toLowerCase()] ?? map[clean(modelId)];
+          if (val !== undefined) return val;
+        }
+        if (modelName) {
+          const val = map[modelName.toLowerCase()] ?? map[clean(modelName)];
+          if (val !== undefined) return val;
+        }
       }
-      if (modelName) {
-        const val = map[modelName.toLowerCase()] ?? map[clean(modelName)];
-        if (val !== undefined) return val;
-      }
-      return null;
+
+      // OMP omits `int` for Haiku 4.5; AA Intelligence Index v4.1.1 scores its reasoning variant at 30.
+      const isHaiku45 = (value) => {
+        const key = clean(value)
+          .replace(/\s*\([^)]*\)\s*$/, '')
+          .replace(/^anthropic[.-]/, '')
+          .replace(/\./g, '-')
+          .replace(/\s+/g, '-');
+        return /^(?:claude-)?(?:haiku-4-5|4-5-haiku)(?:-\d+)?$/.test(key);
+      };
+      return [modelId, modelName].some(isHaiku45) ? 30 : null;
     };
 
     // ---- Line 1 (sections joined by |) ----
@@ -468,9 +478,6 @@ process.stdin.on('end', () => {
 
     const dir = path.basename(cwd);
     const L1 = [modelIndicator, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
-    if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
-      L1.push(`${costColor(d.cost.total_cost_usd)}$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
-    }
     if (d.cost?.total_duration_ms != null) {
       const mins = Math.round(d.cost.total_duration_ms / 60000);
       L1.push(`${timeColor(mins)}${mins}m\x1b[0m`);
@@ -480,6 +487,9 @@ process.stdin.on('end', () => {
 
     // ---- Line 2 (stats joined by |) ----
     const L2 = [];
+    if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
+      L2.push(`${costColor(d.cost.total_cost_usd)}$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
+    }
     if (change) L2.push(change);
     const rl = d.rate_limits;
     // "5h~3h ▅ 62%" — the countdown rides its own label, so the two numbers that share a unit stay

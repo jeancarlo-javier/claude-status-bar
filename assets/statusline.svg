@@ -1,23 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="851" height="164" viewBox="0 0 851 164" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+<svg xmlns="http://www.w3.org/2000/svg" width="784" height="164" viewBox="0 0 784 164" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
   <defs>
     <filter id="blur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="55"/></filter>
-    <clipPath id="card"><rect width="851" height="164" rx="16"/></clipPath>
+    <clipPath id="card"><rect width="784" height="164" rx="16"/></clipPath>
     <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
       <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
     </linearGradient>
   </defs>
   <g clip-path="url(#card)">
-    <rect width="851" height="164" fill="#0b0a12"/>
+    <rect width="784" height="164" fill="#0b0a12"/>
     <g filter="url(#blur)">
-      <ellipse cx="153.18" cy="36.08" rx="221.26000000000002" ry="114.8" fill="#3b2a7a" opacity="0.95"/>
-      <ellipse cx="391.46000000000004" cy="127.92" rx="255.29999999999998" ry="131.20000000000002" fill="#7b2f6b" opacity="0.8"/>
-      <ellipse cx="629.74" cy="29.52" rx="221.26000000000002" ry="123" fill="#2a4a8c" opacity="0.85"/>
-      <ellipse cx="791.4300000000001" cy="114.8" rx="170.20000000000002" ry="114.8" fill="#a33f7d" opacity="0.6"/>
+      <ellipse cx="141.12" cy="36.08" rx="203.84" ry="114.8" fill="#3b2a7a" opacity="0.95"/>
+      <ellipse cx="360.64000000000004" cy="127.92" rx="235.2" ry="131.20000000000002" fill="#7b2f6b" opacity="0.8"/>
+      <ellipse cx="580.16" cy="29.52" rx="203.84" ry="123" fill="#2a4a8c" opacity="0.85"/>
+      <ellipse cx="729.12" cy="114.8" rx="156.8" ry="114.8" fill="#a33f7d" opacity="0.6"/>
     </g>
-    <rect x="34" y="34" width="783" height="96" rx="11" fill="#0d0e15" fill-opacity="0.62"/>
-    <rect x="34.5" y="34.5" width="782" height="95" rx="10.5" fill="none" stroke="url(#edge)"/>
+    <rect x="34" y="34" width="716" height="96" rx="11" fill="#0d0e15" fill-opacity="0.62"/>
+    <rect x="34.5" y="34.5" width="715" height="95" rx="10.5" fill="none" stroke="url(#edge)"/>
   </g>
-  <text x="56" y="70" xml:space="preserve"><tspan x="56.0" fill="#ffd700" font-weight="700">Exec</tspan><tspan x="89.6" fill="#8a8a8a">:</tspan><tspan x="98.0" fill="#d8d8d8"> Compact the status line | Opus 5 </tspan><tspan x="383.6" fill="#8a8a8a">[</tspan><tspan x="392.0" fill="rgb(179,136,244)">xhigh</tspan><tspan x="434.0" fill="#8a8a8a">·</tspan><tspan x="442.4" fill="#ff00ff">63</tspan><tspan x="459.2" fill="#8a8a8a">]</tspan><tspan x="467.6" fill="#d8d8d8"> | claude-status-bar</tspan><tspan x="635.6" fill="#8a8a8a">@</tspan><tspan x="644.0" fill="#d8d8d8">main | </tspan><tspan x="702.8" fill="#f5f543">$3.12</tspan><tspan x="744.8" fill="#d8d8d8"> | </tspan><tspan x="770.0" fill="#23d18b">14m</tspan></text>
-  <text x="56" y="96" xml:space="preserve"><tspan x="56.0" fill="#d8d8d8">chg add-compact-gauges </tspan><tspan x="249.2" fill="#f5f543">2/4</tspan><tspan x="274.4" fill="#d8d8d8"> | ctx </tspan><tspan x="333.2" fill="#23d18b">▃ 38%</tspan><tspan x="375.2" fill="#d8d8d8"> | 5h</tspan><tspan x="417.2" fill="#8a8a8a">~2h</tspan><tspan x="442.4" fill="#d8d8d8"> </tspan><tspan x="450.8" fill="#23d18b">▃ 35%</tspan><tspan x="492.8" fill="#d8d8d8"> | wk</tspan><tspan x="534.8" fill="#f5f543">~3d</tspan><tspan x="560.0" fill="#d8d8d8"> </tspan><tspan x="568.4" fill="#ff8700">▆ 71%</tspan></text>
+  <text x="56" y="70" xml:space="preserve"><tspan x="56.0" fill="#ffd700" font-weight="700">Exec</tspan><tspan x="89.6" fill="#8a8a8a">:</tspan><tspan x="98.0" fill="#d8d8d8"> Compact the status line | Opus 5 </tspan><tspan x="383.6" fill="#8a8a8a">[</tspan><tspan x="392.0" fill="rgb(179,136,244)">xhigh</tspan><tspan x="434.0" fill="#8a8a8a">·</tspan><tspan x="442.4" fill="#ff00ff">63</tspan><tspan x="459.2" fill="#8a8a8a">]</tspan><tspan x="467.6" fill="#d8d8d8"> | claude-status-bar</tspan><tspan x="635.6" fill="#8a8a8a">@</tspan><tspan x="644.0" fill="#d8d8d8">main | </tspan><tspan x="702.8" fill="#23d18b">14m</tspan></text>
+  <text x="56" y="96" xml:space="preserve"><tspan x="56.0" fill="#f5f543">$3.12</tspan><tspan x="98.0" fill="#d8d8d8"> | chg add-compact-gauges </tspan><tspan x="316.4" fill="#f5f543">2/4</tspan><tspan x="341.6" fill="#d8d8d8"> | ctx </tspan><tspan x="400.4" fill="#23d18b">▃ 38%</tspan><tspan x="442.4" fill="#d8d8d8"> | 5h</tspan><tspan x="484.4" fill="#8a8a8a">~2h</tspan><tspan x="509.6" fill="#d8d8d8"> </tspan><tspan x="518.0" fill="#23d18b">▃ 35%</tspan><tspan x="560.0" fill="#d8d8d8"> | wk</tspan><tspan x="602.0" fill="#f5f543">~3d</tspan><tspan x="627.2" fill="#d8d8d8"> </tspan><tspan x="635.6" fill="#ff8700">▆ 71%</tspan></text>
 </svg>
