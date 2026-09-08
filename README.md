@@ -127,14 +127,14 @@ run.
 ## What the two lines show
 
 ```
-Exec 40m: Compact the status bar | Fable 5 xhigh | claude-status-bar@master | 55m
-$3.12 | chg add-compact-gauges 2/4 | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
+Exec 40m: Compact the status bar | Fable 5 [xhigh·66] | claude-status-bar@master | 55m
+chg add-compact-gauges 2/4 | $3.12 | 517k↓34k | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model and reasoning effort, `project@branch` (`↑↓` vs upstream), elapsed minutes |
-| 2 | session cost first, then the OpenSpec change being worked and its task progress, context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
+| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model with `[effort·intelligence]`, `project@branch` (`↑↓` vs upstream), elapsed minutes |
+| 2 | the OpenSpec change being worked and its task progress, session cost, tokens this session spent (`↓` = tokens RTK saved), context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —
 green under 40%, yellow, orange, red at 80% (the auto-compact threshold), blinking
@@ -142,6 +142,28 @@ red at 95%. Each rate limit carries its reset countdown on the label itself —
 `5h~2h` is "5-hour window, about 2 hours left" — in one unit: `~Xd`, `~Xh`, or `~Xm`
 once under an hour. Keeping the two numbers that share a unit side by side leaves the
 percentages lined up down the right of the row.
+
+### What the token count counts
+
+`517k↓34k` is "this session has spent 517k tokens, 34k of them saved by RTK". The total is
+`input + cache_creation + output`, summed per request id — the **new** tokens the session pushed
+through the model.
+
+`cache_read_input_tokens` is deliberately excluded, and that is the whole design decision. Claude
+Code caches every prompt, so on a real 109-request session the split was 450k written to cache
+against **14.1M** read back from it: the same prompt re-sent every turn. Counting reads would
+report 14.6M, a number that grows quadratically with turn count and says nothing about the work
+done. Excluding them, the badge tracks what actually accumulated.
+
+Two consequences worth knowing:
+
+- **`input_tokens` alone is a lie.** With caching on it is a residue — literally 2 tokens per turn
+  on that session, 218 across all 109 requests. Anything that reads it without
+  `cache_creation_input_tokens` undercounts by three orders of magnitude.
+- **The badge is not proportional to the cost beside it.** Cache reads are billed (at 1/10th rate),
+  so they are inside the `$`, not inside the token count. `517k` next to `$15.66` is correct: 67k
+  output at $75/M plus 450k cache writes at $18.75/M plus 14.1M reads at $1.50/M. The `$` is the
+  billing truth; the token count is the volume truth.
 
 ### The countdown's color is the pace
 
@@ -198,13 +220,17 @@ Typical session: 300–800 tokens total.
 - **No network, no dependencies.** The three scripts require `fs`, `os`, `path`,
   `child_process` — nothing else. No HTTP, no telemetry, no analytics.
 - **Reads:** your phase file (contents and mtime), `openspec/changes/`
-  in the current project, your session transcript (output-token counts, plus your prompts and the
+  in the current project, your session transcript (token counts, plus your prompts and the
   model's tool inputs — that is how it tells which change is being worked; read incrementally, see
   below), and two read-only `git` commands in the current repo.
 - **Writes:** two small per-session files under `$TMPDIR`. `ccs-tps-<session>.json` holds the
-  running output-token total and the transcript offset already counted, so the renderer reads
+  running token totals and the transcript offset already counted, so the renderer reads
   only the bytes appended since the last refresh instead of re-reading a transcript that grows to
-  tens of megabytes. `ccs-phase-<session>.json` holds the current phase line and when it first
+  tens of megabytes. It carries a `v` field: because it stores an offset *already counted*, a
+  sidecar written by older arithmetic can never be corrected incrementally, and nothing in its
+  numbers reveals which rule produced them — so a `v` mismatch throws it away and recounts from
+  zero. Skipping that gate once left a 517k session reading `1.1k` for the rest of its life.
+  `ccs-phase-<session>.json` holds the current phase line and when it first
   appeared, which is what makes time-in-phase survive a `touch`.
 - The phase file itself is written by the model's own `echo`, not by this tool.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes

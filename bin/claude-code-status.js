@@ -2,6 +2,7 @@
 // claude-code-status — Jeancarlo's Claude Code statusline
 // | = section, · = inline stat
 
+process.removeAllListeners('warning');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -191,7 +192,12 @@ process.stdin.on('end', () => {
     // happened to sort last. Parsing a whole 16.7MB transcript costs 12ms against 5ms for a regex,
     // and only on the first render of a resumed session; every later render sees ~2KB.
     const scan = (() => {
-      const st = { off: 0, sum: 0, last: '', hist: [], pro: '' };
+      // `v` is the counting contract, not the file format: bump it whenever the arithmetic below
+      // changes. A sidecar holds a byte offset already counted, so a sidecar written by older
+      // arithmetic can never be corrected incrementally — it has to be recounted from zero, and
+      // nothing in its numbers reveals which rule produced them. That is how a mid-session change
+      // once left a 517k session reading 1.1k forever.
+      const st = { v: 3, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '' };
       if (!d.transcript_path) return st;
       try {
         // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
@@ -202,7 +208,8 @@ process.stdin.on('end', () => {
         const cache = path.join(os.tmpdir(), `ccs-tps-${(session || d.transcript_path).replace(/[^\w.-]+/g, '_')}.json`);
         try {
           const prev = JSON.parse(fs.readFileSync(cache, 'utf8'));
-          if (prev.off <= size) Object.assign(st, prev);  // file shrank: a different transcript, so recount
+          // off > size: the file shrank, so it is a different transcript. v mismatch: older arithmetic.
+          if (prev.v === st.v && prev.off <= size) Object.assign(st, prev);
         } catch {}
         if (size > st.off) {
           const fd = fs.openSync(d.transcript_path, 'r');
@@ -213,11 +220,20 @@ process.stdin.on('end', () => {
           const cut = text.lastIndexOf('\n') + 1;  // never consume a half-written trailing line
           for (const line of text.slice(0, cut).split('\n')) {
             const out = line.match(/"output_tokens":(\d+)/); // "output_tokens_details" can't match: it is followed by {
-            if (out) {
+            const inp = line.match(/"input_tokens":(\d+)/);
+            const cc = line.match(/"cache_creation_input_tokens":(\d+)/);
+            if (out || inp || cc) {
               // Every content block of one request repeats that request's cumulative usage, and a
               // request's blocks are contiguous, so the previous id is all we need to dedupe.
               const rid = line.match(/"requestId":"([^"]+)"/)?.[1];
-              if (!rid || rid !== st.last) { if (rid) st.last = rid; st.sum += Number(out[1]); }
+              if (!rid || rid !== st.last) {
+                if (rid) st.last = rid;
+                const outN = out ? Number(out[1]) : 0;
+                const inpN = inp ? Number(inp[1]) : 0;
+                const ccN = cc ? Number(cc[1]) : 0;
+                st.sum += outN;
+                st.total += inpN + ccN + outN;
+              }
             }
             let o;
             try { o = JSON.parse(line); } catch { continue; }
@@ -425,6 +441,33 @@ process.stdin.on('end', () => {
       return [modelId, modelName].some(isHaiku45) ? 30 : null;
     };
 
+    const formatCompactTokens = (num) => {
+      if (!Number.isFinite(num) || num <= 0) return '0';
+      if (num >= 1000000) {
+        const m = num / 1000000;
+        return (m >= 100 ? String(Math.round(m)) : m.toFixed(1).replace(/\.0$/, '')) + 'M';
+      }
+      if (num >= 1000) {
+        const k = num / 1000;
+        return (k >= 100 ? String(Math.round(k)) : k.toFixed(1).replace(/\.0$/, '')) + 'k';
+      }
+      return String(Math.round(num));
+    };
+
+    const getRtkSavings = () => {
+      if (!session) return null;
+      try {
+        const storeFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.rtk`);
+        if (!fs.existsSync(storeFile)) return null;
+        const raw = fs.readFileSync(storeFile, 'utf8').trim();
+        const saved = parseInt(raw, 10);
+        if (!saved || saved <= 0 || !Number.isFinite(saved)) return null;
+        return saved;
+      } catch {
+        return null;
+      }
+    };
+
     // ---- Line 1 (sections joined by |) ----
     const rawEffort = (typeof d.effort === 'string' ? d.effort : d.effort?.level || '').toLowerCase();
     const effortDisplayMap = {
@@ -487,10 +530,17 @@ process.stdin.on('end', () => {
 
     // ---- Line 2 (stats joined by |) ----
     const L2 = [];
+    if (change) L2.push(change);
     if (d.cost?.total_cost_usd != null && d.cost.total_cost_usd > 0) {
       L2.push(`${costColor(d.cost.total_cost_usd)}$${d.cost.total_cost_usd.toFixed(2)}\x1b[0m`);
     }
-    if (change) L2.push(change);
+    const savedTokens = getRtkSavings();
+    const totalTokens = scan.total || 0;
+    if (totalTokens > 0 || (savedTokens && savedTokens > 0)) {
+      const totStr = totalTokens > 0 ? formatCompactTokens(totalTokens) : '';
+      const savStr = savedTokens && savedTokens > 0 ? `\x1b[32m↓${formatCompactTokens(savedTokens)}\x1b[0m` : '';
+      L2.push(`${totStr}${savStr}`);
+    }
     const rl = d.rate_limits;
     // "5h~3h ▅ 62%" — the countdown rides its own label, so the two numbers that share a unit stay
     // together ("5h window, 3h left") and the meter keeps the row's right edge for the percentages.

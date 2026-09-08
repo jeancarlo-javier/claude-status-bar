@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 'use strict';
+process.removeAllListeners('warning');
 
 const assert = require('assert');
 const fs = require('fs');
@@ -39,6 +40,8 @@ fs.writeFileSync(path.join(chg, 'bare-proposal', 'proposal.md'), '# p\n');
 
 // the phase segment reads ~/.claude/session-context/<session_id>, and its mtime is the age shown
 const SESSION = 'sess-test-' + Date.now();
+// the prompt-cache accounting test needs its own transcript, so its own session id and sidecar
+const CACHE_SESSION = 'sess-cache-' + Date.now();
 const phaseFile = path.join(home, '.claude', 'session-context', SESSION);
 fs.mkdirSync(path.dirname(phaseFile), { recursive: true });
 const setPhase = (text, minutesAgo = 0) => {
@@ -180,7 +183,28 @@ async function main() {
 
   const [cheapL1, cheapL2] = cheapCostOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n');
   assert.ok(!cheapL1.includes('$2.50'), `cost should not be in line 1: ${JSON.stringify(cheapL1)}`);
-  assert.ok(cheapL2.startsWith('$2.50'), `cost must be the first element of line 2: ${JSON.stringify(cheapL2)}`);
+  assert.ok(cheapL2.includes('chg just-proposed-change 0/2 +2o | $2.50'), `change must precede cost on line 2: ${JSON.stringify(cheapL2)}`);
+
+  // RTK token savings test: optional, only shown when session-specific .rtk file exists with saved tokens
+  const sessionRtkFile = path.join(home, '.claude', 'session-context', `${SESSION}.rtk`);
+  fs.writeFileSync(sessionRtkFile, '34011');
+
+  const rtkOut = await render({
+    ...JSON.parse(STDIN_JSON),
+    cost: { total_cost_usd: 20.54, total_duration_ms: 600000 },
+  });
+  assert.ok(rtkOut.includes('\x1b[32m↓34k\x1b[0m'), `rtk compact savings badge missing or uncolored: ${JSON.stringify(rtkOut)}`);
+  const [, rtkL2] = rtkOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n');
+  assert.ok(rtkL2.includes('$20.54 | 2k↓34k | ctx'), `rtk badge must sit between cost and ctx with compacted total: ${JSON.stringify(rtkL2)}`);
+
+  // When session .rtk file has 0 saved tokens or is absent, badge must not be shown
+  fs.writeFileSync(sessionRtkFile, '0');
+  const zeroRtkOut = await render();
+  assert.ok(!zeroRtkOut.includes('↓'), `zero saved tokens must not render badge: ${JSON.stringify(zeroRtkOut)}`);
+  fs.unlinkSync(sessionRtkFile);
+  const noRtkOut = await render();
+  assert.ok(!noRtkOut.includes('↓'), `absent session rtk file must not render badge: ${JSON.stringify(noRtkOut)}`);
+  assert.ok(noRtkOut.includes('2k | ctx'), `total tokens without savings must render before ctx: ${JSON.stringify(noRtkOut)}`);
   for (const token of ['| h:', '💧', '👀', '🚶', '☀️', "-hd"]) {
     assert.ok(!plain.includes(token), `removed health token rendered: ${token}`);
   }
@@ -342,6 +366,41 @@ async function main() {
   });
   const haikuPlain = haikuRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
   assert.ok(haikuPlain.includes('Claude Haiku 4.5 [high·30]'), `Haiku 4.5 intelligence score missing: ${JSON.stringify(haikuPlain)}`);
+  // ---- prompt-cache accounting, and the sidecar that outlives a counting change ----
+  // Claude Code caches every prompt, so `input_tokens` is a residue of 2 while the real input
+  // rides in cache_creation_input_tokens. Counting input+output alone read a 517k session as
+  // 1.1k next to a $15.66 cost. cache_read is excluded on purpose: it re-bills the same prompt
+  // every turn, so counting it would report ~4x the tokens the session actually transmitted.
+  const cacheTranscript = path.join(home, 'cache-transcript.jsonl');
+  const cacheSidecar = path.join(os.tmpdir(), `ccs-tps-${CACHE_SESSION}.json`);
+  fs.writeFileSync(cacheTranscript, [
+    // two content blocks of one request repeat its usage: counted once
+    '{"requestId":"req_1","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":29506,"cache_read_input_tokens":26933,"output_tokens":297}}}',
+    '{"requestId":"req_1","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":29506,"cache_read_input_tokens":26933,"output_tokens":297}}}',
+    '{"requestId":"req_2","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":833,"cache_read_input_tokens":56439,"output_tokens":148}}}',
+  ].join('\n') + '\n');
+  const cachePayload = {
+    ...JSON.parse(STDIN_JSON),
+    session_id: CACHE_SESSION,
+    transcript_path: cacheTranscript,
+  };
+  try { fs.unlinkSync(cacheSidecar); } catch {}
+
+  // (2+29506+297) + (2+833+148) = 30788
+  const cacheL2 = (await render(cachePayload)).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
+  assert.ok(cacheL2.includes('30.8k'), `cache_creation tokens not counted: ${JSON.stringify(cacheL2)}`);
+  assert.ok(!cacheL2.includes('114k'), `cache_read must not be counted: ${JSON.stringify(cacheL2)}`);
+  // tok/s stays output-only (445 / 20s): the badge's total and the speed counter must not conflate
+  assert.ok(cacheL2.includes('22.3 tok/s'), `tok/s must stay output-only: ${JSON.stringify(cacheL2)}`);
+
+  // A sidecar written by older arithmetic holds a byte offset already counted, so its numbers can
+  // never be corrected incrementally — the version gate must throw it away and recount.
+  fs.writeFileSync(cacheSidecar, JSON.stringify({
+    off: fs.statSync(cacheTranscript).size, sum: 445, total: 449, last: 'req_2', hist: [], pro: '',
+  }));
+  const staleL2 = (await render(cachePayload)).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
+  assert.ok(staleL2.includes('30.8k'), `unversioned sidecar was trusted instead of recounted: ${JSON.stringify(staleL2)}`);
+
   console.log('ALL TESTS PASSED');
 }
 
@@ -351,4 +410,5 @@ main()
     fs.rmSync(home, { recursive: true, force: true });
     try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-phase-${SESSION}.json`)); } catch {}
     try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${SESSION}.json`)); } catch {}
+    try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${CACHE_SESSION}.json`)); } catch {}
   });
