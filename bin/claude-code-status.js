@@ -249,7 +249,11 @@ process.stdin.on('end', () => {
               // Judge the message, not each block: a turn arrives as the prompt plus whatever
               // system-reminders rode along with it, and reading those separately would let a
               // reminder with no id in it wipe the id the prompt just gave.
-              const t = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n');
+              // Tags out first: a slash command never reaches the transcript the way it was typed —
+              // it arrives as `<command-name>/opsx:apply</command-name>\n<command-args>the-id</command-args>`,
+              // so the command and the id it was handed are never adjacent, and the tag names are
+              // themselves hyphenated words that make every command look like it names two changes.
+              const t = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n').replace(/<\/?[a-z-]+>/gi, ' ');
               if (!t) continue;                              // tool results only — not a turn of yours
               const cmd = cmdChange(t);
               // A command names the change to work on and holds until superseded. Naming one any

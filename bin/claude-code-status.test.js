@@ -298,6 +298,10 @@ async function main() {
   say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"noise"},{"type":"text","text":"/opsx:apply blocked-change"}]}}`);
   assert.equal(await chgSeg(), 'blocked-change', 'text block alongside a tool_result was dropped');
 
+  // a slash command arrives split across tags, never as the line you typed
+  say(userMsg('<command-message>opsx:apply</command-message>\n<command-name>/opsx:apply</command-name>\n<command-args>fresh-change</command-args>'));
+  assert.equal(await chgSeg(), 'fresh-change', 'a real /opsx: slash command did not select its argument');
+
   // naming exactly one change selects it
   say(userMsg('sigo con fresh-change'));
   assert.equal(await chgSeg(), 'fresh-change', 'prose naming one change did not select it');
