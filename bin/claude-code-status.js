@@ -342,14 +342,16 @@ process.stdin.on('end', () => {
           .sort((a, b) => b.f - a.f || Number(b.done > 0) - Number(a.done > 0) || Number(b.total > 0) - Number(a.total > 0) || b.t - a.t);
         const best = all[0];
         if (!best) return '';
-        const name = trunc(best.c);
+        const isSelected = best.f > 0;
+        const tag = isSelected ? '\x1b[1;38;5;75mchg\x1b[0m' : '\x1b[38;5;244mdf\x1b[0m';
+        const name = isSelected ? trunc(best.c) : `\x1b[38;5;248m${trunc(best.c)}\x1b[0m`;
         // other open changes. Space-separated and "o"-suffixed so it can't read as arithmetic on the task count.
         const more = all.length > 1 ? ` \x1b[38;5;245m+${all.length - 1}o\x1b[0m` : '';
-        if (!best.total) return `chg ${name} \x1b[38;5;245m·\x1b[0m${more}`;  // proposal not expanded yet
-        if (best.done === best.total) return `chg ${name} \x1b[1;32m✓\x1b[0m${more}`;  // ready to /opsx:archive
+        if (!best.total) return `${tag} ${name} \x1b[38;5;245m·\x1b[0m${more}`;  // proposal not expanded yet
+        if (best.done === best.total) return `${tag} ${name} \x1b[1;32m✓\x1b[0m${more}`;  // ready to /opsx:archive
         const pct = Math.round(100 * best.done / best.total);
         const c = pct >= 75 ? '\x1b[38;5;114m' : pct >= 25 ? '\x1b[33m' : '\x1b[38;5;250m';
-        return `chg ${name} ${c}${best.done}/${best.total}\x1b[0m${more}`;
+        return `${tag} ${name} ${c}${best.done}/${best.total}\x1b[0m${more}`;
       } catch { return ''; }
     })();
 

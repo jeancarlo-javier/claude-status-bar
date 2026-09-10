@@ -87,7 +87,9 @@ async function main() {
   assert.ok(line2.includes('ctx ▄ 50%'), `context gauge missing: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('░'), `old 8-block bar still rendered: ${JSON.stringify(plain)}`);
   // newest tasks.md wins, "archive" skipped, [x] and [X] both counted
-  assert.ok(line2.startsWith('chg live-change 2/3 +3o'), `openspec change missing, or others not counted: ${JSON.stringify(plain)}`);
+  assert.ok(line2.startsWith('df live-change 2/3 +3o'), `openspec change missing, or others not counted: ${JSON.stringify(plain)}`);
+  assert.ok(out.includes('\x1b[38;5;244mdf\x1b[0m'), `df tag not colored with dim grey 244: ${JSON.stringify(out)}`);
+  assert.ok(out.includes('\x1b[38;5;248mlive-change\x1b[0m'), `unselected change name not subdued grey 248: ${JSON.stringify(out)}`);
   assert.ok(!plain.includes('stale-change'), `stale change won over the newer one: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('just-proposed'), `fresh proposal stole the bar: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('bare-proposal'), `a change with no tasks.md stole the bar: ${JSON.stringify(plain)}`);
@@ -130,7 +132,7 @@ async function main() {
   // every task checked -> the archive-me tick, not "3/3"
   fs.writeFileSync(path.join(chg, 'live-change', 'tasks.md'), '- [x] a\n- [X] b\n- [x] c\n');
   const done = (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
-  assert.ok(done.startsWith('chg live-change ✓'), `completed change not flagged for archive: ${JSON.stringify(done)}`);
+  assert.ok(done.startsWith('df live-change ✓'), `completed change not flagged for archive: ${JSON.stringify(done)}`);
 
   // archived changes drop off on the next render, with no restart
   fs.renameSync(path.join(chg, 'live-change'), path.join(chg, 'archive', '2026-08-28-live-change'));
@@ -183,7 +185,7 @@ async function main() {
 
   const [cheapL1, cheapL2] = cheapCostOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n');
   assert.ok(!cheapL1.includes('$2.50'), `cost should not be in line 1: ${JSON.stringify(cheapL1)}`);
-  assert.ok(cheapL2.includes('chg just-proposed-change 0/2 +2o | $2.50'), `change must precede cost on line 2: ${JSON.stringify(cheapL2)}`);
+  assert.ok(cheapL2.includes('df just-proposed-change 0/2 +2o | $2.50'), `change must precede cost on line 2: ${JSON.stringify(cheapL2)}`);
 
   // RTK token savings test: optional, only shown when session-specific .rtk file exists with saved tokens
   const sessionRtkFile = path.join(home, '.claude', 'session-context', `${SESSION}.rtk`);
@@ -274,12 +276,16 @@ async function main() {
 
   const say = (...lines) => fs.appendFileSync(transcript, lines.join('\n') + '\n');
   const chgSeg = async () => (await render()).replace(/\x1b\[[0-9;]*m/g, '')
-    .split('\n')[1].match(/chg (\S+)/)?.[1];
+    .split('\n')[1].match(/(?:chg|df) (\S+)/)?.[1];
+  const tagSeg = async () => (await render()).replace(/\x1b\[[0-9;]*m/g, '')
+    .split('\n')[1].match(/^(chg|df) /)?.[1];
   const userMsg = (text, extra = '') => `{"type":"user"${extra},"message":{"role":"user","content":${JSON.stringify(text)}}}`;
   const toolUse = (input) => `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","input":${JSON.stringify(input)}}]}}`;
 
   // progress alone: the blocked change wins, which is the bug
   assert.equal(await chgSeg(), 'blocked-change', 'baseline: furthest-along change should lead');
+  assert.equal(await tagSeg(), 'df', 'baseline change should be tagged df');
+  assert.ok((await render()).includes('\x1b[38;5;244mdf\x1b[0m'), 'df tag must use dim grey 244');
 
   // an `ls` listing every change is tool *output* — it must not select anything
   say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"openspec/changes/fresh-change/\\nopenspec/changes/blocked-change/"}]}}`);
@@ -288,6 +294,8 @@ async function main() {
   // opening one of its files does
   say(toolUse({ file_path: '/repo/openspec/changes/fresh-change/tasks.md' }));
   assert.equal(await chgSeg(), 'fresh-change', 'opening a change file did not select it');
+  assert.equal(await tagSeg(), 'chg', 'selected change should be tagged chg');
+  assert.ok((await render()).includes('\x1b[1;38;5;75mchg\x1b[0m'), 'chg tag must use bold cyan 75');
 
   // a subagent's picks belong to the subagent, and isMeta is the harness talking, not you
   say(toolUse({ file_path: '/repo/openspec/changes/blocked-change/tasks.md' }).replace('{"type":"assistant"', '{"type":"assistant","isSidechain":true'));
