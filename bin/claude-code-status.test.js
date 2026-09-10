@@ -345,6 +345,22 @@ async function main() {
   fs.writeFileSync(path.join(chg, 'later-change-2', 'tasks.md'), '- [x] a\n- [ ] b\n');
   assert.equal(await chgSeg(), 'later-change', 'a longer id sharing the prefix stole the selection');
 
+  // dummy example placeholders like add-auth must never be selected
+  say(userMsg('**Input**: Optionally specify a change name (e.g., `/opsx:apply add-auth`).'));
+  assert.equal(await chgSeg(), 'later-change', 'dummy example placeholder add-auth was erroneously selected');
+
+  // subproject discovery: root openspec/changes has archive only, subproject has active change
+  const umbrellaDir = path.join(home, 'umbrella');
+  fs.mkdirSync(path.join(umbrellaDir, 'openspec', 'changes', 'archive'), { recursive: true });
+  const subprojectChanges = path.join(umbrellaDir, 'subpkg', 'openspec', 'changes', 'sub-feature');
+  fs.mkdirSync(subprojectChanges, { recursive: true });
+  fs.writeFileSync(path.join(subprojectChanges, 'tasks.md'), '- [x] task 1\n- [ ] task 2\n');
+  const umbrellaOut = (await render({
+    ...JSON.parse(STDIN_JSON),
+    workspace: { current_dir: umbrellaDir },
+  })).replace(/\x1b\[[0-9;]*m/g, '');
+  assert.ok(umbrellaOut.includes('df sub-feature 1/2'), `subproject change missing in umbrella dir: ${JSON.stringify(umbrellaOut)}`);
+
 
   // intelligence score + effort formatting: e.g. "Gemini 3.7 Flash [high·56]"
   const intRender = await render({

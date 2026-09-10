@@ -160,23 +160,39 @@ process.stdin.on('end', () => {
     // A selection is remembered without discarding the one before it. `/opsx:propose new-id` is
     // recorded before it creates its directory, and dropping the change you were on the moment that
     // unresolvable id arrives would leave the bar showing an unrelated one for the whole proposal.
-    const keep = (st, id) => { st.hist = [id, ...st.hist.filter(x => x !== id)].slice(0, 3); st.pro = ''; };
+    const DUMMY_IDS = new Set(['add-auth', 'other', 'name', 'slug', 'change-id', 'id', 'the-id', 'archive']);
+    const keep = (st, id, dir) => {
+      st.hist = [id, ...st.hist.filter(x => x !== id)].slice(0, 3);
+      st.pro = '';
+      if (dir && !st.dirs.includes(dir)) st.dirs.unshift(dir);
+    };
     const last = (s, re) => {           // last match wins: a later selection supersedes an earlier one
       let hit = '';
-      for (const m of s.matchAll(re)) { const id = m[1] || m[2]; if (id && id !== 'archive') hit = id; }
+      for (const m of s.matchAll(re)) {
+        const id = m[1] || m[2];
+        if (id && !DUMMY_IDS.has(id.toLowerCase())) hit = id;
+      }
       return hit;
     };
     // An instruction naming a change. ["'\\]* rather than "?: a quoted argument reaches here through
     // JSON.stringify, so what precedes the id is `\"`, not `"`.
     const cmdChange = s => last(s, /--change[\s=]+["'\\]*([a-z0-9][\w.-]*)|\/opsx:\w+\s+["'\\]*([a-z0-9][\w.-]*)/gi);
     // A file inside the change's own directory.
-    const pathChange = s => last(s, /openspec\/changes\/([a-z0-9][\w.-]*)\//gi);
+    const pathChange = s => {
+      let hit = { id: '', dir: '' };
+      for (const m of s.matchAll(/(?:^|["'\s])([^\s"']*[\\/])?openspec[\\/]changes[\\/]([a-z0-9][\w.-]*)/gi)) {
+        const dirPrefix = m[1] || '';
+        const id = m[2];
+        if (id && !DUMMY_IDS.has(id.toLowerCase())) hit = { id, dir: dirPrefix };
+      }
+      return hit;
+    };
     // Prose naming a change ("sigo con landing-tracking-parity"). Only when the message names
     // exactly one candidate — "apply landing-tracking-parity, fix-phpstan is still blocked" names
     // two, and there the last one mentioned is precisely the wrong answer.
     const soleChange = s => {
       const seen = new Set();
-      for (const m of s.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/g)) if (m[0] !== 'archive') seen.add(m[0]);
+      for (const m of s.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/g)) if (!DUMMY_IDS.has(m[0].toLowerCase())) seen.add(m[0]);
       return seen.size === 1 ? [...seen][0] : '';
     };
 
@@ -197,7 +213,7 @@ process.stdin.on('end', () => {
       // arithmetic can never be corrected incrementally — it has to be recounted from zero, and
       // nothing in its numbers reveals which rule produced them. That is how a mid-session change
       // once left a 517k session reading 1.1k forever.
-      const st = { v: 3, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '' };
+      const st = { v: 3, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [] };
       if (!d.transcript_path) return st;
       try {
         // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
@@ -255,19 +271,21 @@ process.stdin.on('end', () => {
               // themselves hyphenated words that make every command look like it names two changes.
               const t = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n').replace(/<\/?[a-z-]+>/gi, ' ');
               if (!t) continue;                              // tool results only — not a turn of yours
+              const pc = pathChange(t);
               const cmd = cmdChange(t);
-              // A command names the change to work on and holds until superseded. Naming one any
-              // other way is softer than that: a path pasted out of a stack trace, or a change
-              // mentioned in passing ("blocked-one is still waiting on them"), is worth following
-              // for now but must not outlive the aside. So it is dropped by the next thing you say
-              // that names nothing — which is what the unconditional assignment below does.
-              if (cmd) keep(st, cmd); else st.pro = pathChange(t) || soleChange(t);
+              const dir = pc.dir ? path.resolve(cwd, pc.dir, 'openspec', 'changes') : '';
+              if (cmd) keep(st, cmd, dir);
+              else if (pc.id) keep(st, pc.id, dir);
+              else st.pro = soleChange(t);
             } else {
               for (const b of blocks) {
                 if (b.type !== 'tool_use') continue;
                 const s = JSON.stringify(b.input ?? '');
-                const id = cmdChange(s) || pathChange(s);     // the model actually opened it or ran it
-                if (id) keep(st, id);
+                const pc = pathChange(s);
+                const cmd = cmdChange(s);
+                const id = cmd || pc.id;
+                const dir = pc.dir ? path.resolve(cwd, pc.dir, 'openspec', 'changes') : '';
+                if (id) keep(st, id, dir);
               }
             }
             // Ids are kept without checking that the directory exists: `/opsx:propose new-id` is
@@ -287,13 +305,31 @@ process.stdin.on('end', () => {
     // the one whose tasks.md was touched last is the one being worked. No tasks.md = proposal not expanded yet.
     const change = (() => {
       try {
-        let root = cwd;
-        while (!fs.existsSync(path.join(root, 'openspec', 'changes'))) {
-          const up = path.dirname(root);
-          if (up === root || root === os.homedir()) return '';
-          root = up;
+        const candidateDirs = [];
+        if (scan.dirs) {
+          for (const d of scan.dirs) {
+            if (fs.existsSync(d) && (d.startsWith(cwd) || cwd.startsWith(d)) && !candidateDirs.includes(d)) candidateDirs.push(d);
+          }
         }
-        const dir = path.join(root, 'openspec', 'changes');
+        const direct = path.join(cwd, 'openspec', 'changes');
+        if (fs.existsSync(direct) && !candidateDirs.includes(direct)) candidateDirs.push(direct);
+
+        try {
+          for (const ent of fs.readdirSync(cwd, { withFileTypes: true })) {
+            if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
+              const sub = path.join(cwd, ent.name, 'openspec', 'changes');
+              if (fs.existsSync(sub) && !candidateDirs.includes(sub)) candidateDirs.push(sub);
+            }
+          }
+        } catch {}
+
+        let parent = path.dirname(cwd);
+        while (parent !== cwd && parent !== '/' && parent !== os.homedir()) {
+          const up = path.join(parent, 'openspec', 'changes');
+          if (fs.existsSync(up) && !candidateDirs.includes(up)) candidateDirs.push(up);
+          parent = path.dirname(parent);
+        }
+
         // The change you are furthest through is not always the change you are on: one that is blocked
         // on someone else sits at 32/34 forever and keeps out-ranking the one you switched to. Two
         // signals say which one you actually mean, strongest first.
@@ -312,27 +348,26 @@ process.stdin.on('end', () => {
           const n = id.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && fw.has(w)).length;
           return n > 1 ? n : 0;
         };
-        const open = fs.readdirSync(dir, { withFileTypes: true })
-          .filter(e => e.isDirectory() && e.name !== 'archive')  // /opsx:archive moves the dir under archive/, so it drops off here on its own
-          .map(({ name: c }) => {
-            const f = path.join(dir, c, 'tasks.md');
+        const seen = new Set();
+        const open = [];
+        for (const dir of candidateDirs) {
+          let entries = [];
+          try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+          for (const entry of entries) {
+            if (!entry.isDirectory() || entry.name === 'archive' || seen.has(entry.name)) continue;
+            seen.add(entry.name);
+            const f = path.join(dir, entry.name, 'tasks.md');
             try {
               const md = fs.readFileSync(f, 'utf8');
               const done = (md.match(/^\s*-\s*\[x\]/gim) || []).length;
               const total = done + (md.match(/^\s*-\s*\[ \]/gm) || []).length;
-              return { c, done, total, t: fs.statSync(f).mtimeMs };
+              open.push({ c: entry.name, done, total, t: fs.statSync(f).mtimeMs });
             } catch {
-              // no tasks.md yet: proposed but not expanded. Still worth showing — otherwise a fresh
-              // /opsx:propose leaves the bar empty and the open change is invisible.
-              return { c, done: 0, total: 0, t: fs.statSync(path.join(dir, c)).mtimeMs };
+              open.push({ c: entry.name, done: 0, total: 0, t: fs.statSync(path.join(dir, entry.name)).mtimeMs });
             }
-          })
-          // The change the focus line names wins outright. Failing that, a change you have started
-          // outranks an expanded one, which outranks a bare proposal, so /opsx:propose can't steal the
-          // bar from the change you are mid-way through. Then most-recently-worked wins, which is the
-          // same order `openspec list` uses.
-          ;
-        // Resolving against the directories that exist right now is what makes it safe to have
+          }
+        }
+        if (!open.length) return '';
         // recorded an id before its directory was there: an id that is not real yet is skipped,
         // and the selection before it still stands until it becomes real.
         const ids = new Set(open.map(c => c.c));
