@@ -440,7 +440,12 @@ process.stdin.on('end', () => {
         const best = all[0];
         if (!best) return '';
         const isSelected = best.f > 0;
-        const tag = isSelected ? '\x1b[1;38;5;75mchg\x1b[0m' : '\x1b[38;5;244mdf\x1b[0m';
+        // Two dimensions, two channels, no extra width: the hue is where the change is in its own
+        // lifecycle — blue proposing (no tasks.md yet, same blue as the Planification phase), cyan
+        // being applied, green every box ticked — and the weight is whether this session chose it
+        // (bold `chg`) or the bar is recommending it (dim `df`).
+        const stage = !best.total ? 111 : best.done === best.total ? 114 : 75;
+        const tag = `\x1b[${isSelected ? 1 : 2};38;5;${stage}m${isSelected ? 'chg' : 'df'}\x1b[0m`;
         const name = isSelected ? trunc(best.c) : `\x1b[38;5;248m${trunc(best.c)}\x1b[0m`;
         // other open changes. Space-separated and "o"-suffixed so it can't read as arithmetic on the task count.
         const more = all.length > 1 ? ` \x1b[38;5;245m+${all.length - 1}o\x1b[0m` : '';

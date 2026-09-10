@@ -206,11 +206,15 @@ extra width:
 Amber needs 50% used before it can fire, so a spiky first hour does not paint the whole session
 amber, and it needs a fifth of the window elapsed before the projection means anything.
 
-The change segment tracks `openspec/changes/`: `chg` (bold cyan) when the change was
-selected/worked on in this session, or `df` (dim grey) when displaying the repo's
-default recommendation. `2/4` is checked tasks, `✓` means every box is ticked and it is
-ready to `/opsx:archive`, a lone `·` is a proposal whose `tasks.md` does not exist yet,
-and `+3o` counts the other changes left open. Archiving one drops it on the next render.
+The change segment tracks `openspec/changes/` on two channels at once. The **letters** say who
+chose it: `chg` (bold) when this session selected/worked the change, `df` (dim) when the bar is
+displaying the repo's default recommendation. The **hue** says where that change is in its own
+lifecycle: **111 blue** while it is still a proposal, **75 cyan** while its tasks are being
+applied, **114 green** once every box is ticked. Blue is the same blue as the `Planification`
+phase, so both rows agree on what stage you are in. Then `2/4` is checked tasks (its own grey →
+amber → green gradient for how far along), `✓` means ready to `/opsx:archive`, a lone `·` is a
+proposal whose `tasks.md` does not exist yet, and `+3o` counts the other changes left open.
+Archiving one drops it on the next render.
 
 Which one, when several are open: the change this session **selected** wins — you handed its id
 to an `/opsx:` command, the model opened a file under it, or you named it in a prompt. That beats

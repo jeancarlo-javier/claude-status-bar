@@ -90,7 +90,8 @@ async function main() {
   assert.ok(!plain.includes('░'), `old 8-block bar still rendered: ${JSON.stringify(plain)}`);
   // newest tasks.md wins, "archive" skipped, [x] and [X] both counted
   assert.ok(line2.startsWith('df live-change 2/3 +3o'), `openspec change missing, or others not counted: ${JSON.stringify(plain)}`);
-  assert.ok(out.includes('\x1b[38;5;244mdf\x1b[0m'), `df tag not colored with dim grey 244: ${JSON.stringify(out)}`);
+  // hue = lifecycle stage (cyan 75 = being applied), weight = who chose it (dim 2 = recommendation)
+  assert.ok(out.includes('\x1b[2;38;5;75mdf\x1b[0m'), `df tag not dim cyan for a change in progress: ${JSON.stringify(out)}`);
   assert.ok(out.includes('\x1b[38;5;248mlive-change\x1b[0m'), `unselected change name not subdued grey 248: ${JSON.stringify(out)}`);
   assert.ok(!plain.includes('stale-change'), `stale change won over the newer one: ${JSON.stringify(plain)}`);
   assert.ok(!plain.includes('just-proposed'), `fresh proposal stole the bar: ${JSON.stringify(plain)}`);
@@ -133,8 +134,10 @@ async function main() {
 
   // every task checked -> the archive-me tick, not "3/3"
   fs.writeFileSync(path.join(chg, 'live-change', 'tasks.md'), '- [x] a\n- [X] b\n- [x] c\n');
-  const done = (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
+  const doneOutput = await render();
+  const done = doneOutput.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
   assert.ok(done.startsWith('df live-change ✓'), `completed change not flagged for archive: ${JSON.stringify(done)}`);
+  assert.ok(doneOutput.includes('\x1b[2;38;5;114mdf\x1b[0m'), `every box ticked did not turn the tag green: ${JSON.stringify(doneOutput)}`);
 
   // archived changes drop off on the next render, with no restart
   fs.renameSync(path.join(chg, 'live-change'), path.join(chg, 'archive', '2026-08-28-live-change'));
@@ -287,7 +290,7 @@ async function main() {
   // progress alone: the blocked change wins, which is the bug
   assert.equal(await chgSeg(), 'blocked-change', 'baseline: furthest-along change should lead');
   assert.equal(await tagSeg(), 'df', 'baseline change should be tagged df');
-  assert.ok((await render()).includes('\x1b[38;5;244mdf\x1b[0m'), 'df tag must use dim grey 244');
+  assert.ok((await render()).includes('\x1b[2;38;5;75mdf\x1b[0m'), 'df tag must be dim cyan while the change is in progress');
 
   // an `ls` listing every change is tool *output* — it must not select anything
   say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"openspec/changes/fresh-change/\\nopenspec/changes/blocked-change/"}]}}`);
@@ -297,7 +300,7 @@ async function main() {
   say(toolUse({ file_path: '/repo/openspec/changes/fresh-change/tasks.md' }));
   assert.equal(await chgSeg(), 'fresh-change', 'opening a change file did not select it');
   assert.equal(await tagSeg(), 'chg', 'selected change should be tagged chg');
-  assert.ok((await render()).includes('\x1b[1;38;5;75mchg\x1b[0m'), 'chg tag must use bold cyan 75');
+  assert.ok((await render()).includes('\x1b[1;38;5;75mchg\x1b[0m'), 'a selected change in progress must be bold cyan 75');
 
   // a subagent's picks belong to the subagent, and isMeta is the harness talking, not you
   say(toolUse({ file_path: '/repo/openspec/changes/blocked-change/tasks.md' }).replace('{"type":"assistant"', '{"type":"assistant","isSidechain":true'));
@@ -350,6 +353,16 @@ async function main() {
   // dummy example placeholders like add-auth must never be selected
   say(userMsg('**Input**: Optionally specify a change name (e.g., `/opsx:apply add-auth`).'));
   assert.equal(await chgSeg(), 'later-change', 'dummy example placeholder add-auth was erroneously selected');
+
+  // stage hue: a change still being proposed (no tasks.md) is the blue of the Planification phase,
+  // so both rows say "designing" at once
+  fs.mkdirSync(path.join(chg, 'proposal-only'), { recursive: true });
+  say(userMsg('/opsx:apply proposal-only'));
+  const proposalOut = await render();
+  assert.ok(proposalOut.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1].startsWith('chg proposal-only ·'),
+    `a change with no tasks.md did not render as a bare proposal: ${JSON.stringify(proposalOut)}`);
+  assert.ok(proposalOut.includes('\x1b[1;38;5;111mchg\x1b[0m'), `a proposal's tag is not plan blue 111: ${JSON.stringify(proposalOut)}`);
+  say(userMsg('/opsx:apply later-change'));
 
   // subproject discovery: root openspec/changes has archive only, subproject has active change
   const umbrellaDir = path.join(home, 'umbrella');
