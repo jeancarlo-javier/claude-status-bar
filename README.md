@@ -94,6 +94,7 @@ Canonical labels are English. Semantic palette (256-color):
 |-------|-------|---------|
 | `Research:` | 176 orchid | thinking |
 | `Plan:` | 111 blue | thinking |
+| `Planification:` | 111 blue | proposing a change — **written by the bar, not the model** |
 | `Review-Plan:` | 141 lavender | checking a plan |
 | `Exec:` | 220 gold | working |
 | `Q&A:` / `Review:` / `Review-Execution:` | 208 orange | questioning |
@@ -109,6 +110,30 @@ Canonical labels are English. Semantic palette (256-color):
 
 Only the phase label is colored — the subject renders plain. The subject truncates at 48
 chars; branch names and change ids at 32.
+
+### Planification writes itself
+
+Every label above is the model's to write. `Planification:` is the exception, because it is the
+one transition with a machine-readable trigger: `/opsx:propose` always ends up running one of two
+OpenSpec commands that name the slug it just chose — `openspec new change <slug>` or
+`openspec status --change <slug>` — so the bar reads that off the transcript it is already
+tailing and writes `Planification: <slug>` itself. Zero tokens: no rule, no reminder, no tool
+call, nothing added to any prompt. It appears on the render that follows the command.
+
+What can trigger it is deliberately narrow. The proposal has to be armed by the slash command's
+own `<command-name>` envelope, so prose or documentation quoting `/opsx:propose` cannot start one;
+the slug has to come from the `command` of a Bash tool call whose first token is `openspec`, so a
+`npx …` wrapper, a `cd … &&`, an `echo`, or a quoted example inside an option is text and not a
+run; and a subagent's proposal belongs to the subagent. The arm survives ordinary clarification
+replies — a proposal legitimately asks for scope first, and the answer is often the slug itself —
+and is dropped by another `/opsx:` command, an explicit cancellation, or you running the OpenSpec
+command yourself.
+
+Once you write a phase, it stays yours: the write is guarded by the phase file's own mtime, so a
+transcript replayed after the tmp sidecar is swept can never overwrite a newer label. That guard
+is only as good as the event's clock, so an event dated more than a minute into the future is
+ignored rather than trusted to outrank a label you write before it comes round. Proposing again is
+a newer event, so it does reactivate — including the same slug twice.
 
 ### Time in phase
 
@@ -233,7 +258,8 @@ Typical session: 300–800 tokens total.
   zero. Skipping that gate once left a 517k session reading `1.1k` for the rest of its life.
   `ccs-phase-<session>.json` holds the current phase line and when it first
   appeared, which is what makes time-in-phase survive a `touch`.
-- The phase file itself is written by the model's own `echo`, not by this tool.
+- The phase file is written by the model's own `echo`, with one exception: `Planification:` is
+  written by the renderer when `/opsx:propose` names a slug (see above). Nothing is sent anywhere.
 - **One thing leaves the machine:** when the phase file goes stale, the nudge hook echoes
   up to 120 chars of it back to the model — so the subject reaches the API as part of your
   next prompt, exactly like anything you type.

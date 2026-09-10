@@ -42,6 +42,8 @@ fs.writeFileSync(path.join(chg, 'bare-proposal', 'proposal.md'), '# p\n');
 const SESSION = 'sess-test-' + Date.now();
 // the prompt-cache accounting test needs its own transcript, so its own session id and sidecar
 const CACHE_SESSION = 'sess-cache-' + Date.now();
+// the Planification tests need their own transcript, session id and sidecars too
+const PLAN_SESSION = 'sess-plan-' + Date.now();
 const phaseFile = path.join(home, '.claude', 'session-context', SESSION);
 fs.mkdirSync(path.dirname(phaseFile), { recursive: true });
 const setPhase = (text, minutesAgo = 0) => {
@@ -361,6 +363,93 @@ async function main() {
   })).replace(/\x1b\[[0-9;]*m/g, '');
   assert.ok(umbrellaOut.includes('df sub-feature 1/2'), `subproject change missing in umbrella dir: ${JSON.stringify(umbrellaOut)}`);
 
+  // ── Planification: the one phase the bar writes itself ────────────────────────────────────
+  // `/opsx:propose` is the only transition with a machine-readable trigger: the workflow always
+  // ends up running an OpenSpec command that names the slug it just chose. Every other phase
+  // stays the model's to write.
+  const planFile = path.join(home, '.claude', 'session-context', PLAN_SESSION);
+  const planTx = path.join(home, 'plan-transcript.jsonl');
+  fs.writeFileSync(planTx, '');
+  const planRender = () => render({ ...JSON.parse(STDIN_JSON), session_id: PLAN_SESSION, transcript_path: planTx });
+  const planPhase = () => { try { return fs.readFileSync(planFile, 'utf8').trim(); } catch { return ''; } };
+  const planSay = (...lines) => fs.appendFileSync(planTx, lines.join('\n') + '\n');
+  const at = (min = 0) => new Date(Date.now() + min * 60000).toISOString();
+  // A manual label wins on mtime, so the tests set that mtime explicitly instead of racing it.
+  const setManual = (text, minutesAgo = 0) => {
+    fs.writeFileSync(planFile, text + '\n');
+    const when = new Date(Date.now() - minutesAgo * 60000);
+    fs.utimesSync(planFile, when, when);
+  };
+  // a slash command never reaches the transcript the way it was typed
+  const propose = (extra = '') => `{"type":"user"${extra},"message":{"role":"user","content":[{"type":"text","text":"<command-message>opsx:propose</command-message>\\n<command-name>/opsx:propose</command-name>"}]}}`;
+  const bashUse = (command, when = at(), extra = '') => `{"type":"assistant"${extra},"timestamp":${JSON.stringify(when)},"message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":${JSON.stringify(command)}}}]}}`;
+
+  // the command alone is not the trigger: with no proposal in flight nothing is inferred
+  planSay(bashUse('openspec new change unarmed-change'));
+  await planRender();
+  assert.equal(planPhase(), '', `an unarmed openspec command wrote a phase: ${JSON.stringify(planPhase())}`);
+
+  // armed, but only a command that actually runs counts — a wrapper or a quoted example is text
+  planSay(propose(), bashUse('echo npx openspec new change false-slug'), bashUse("openspec --example='status --change fake '"));
+  await planRender();
+  assert.equal(planPhase(), '', `a wrapped or quoted command fired: ${JSON.stringify(planPhase())}`);
+
+  // the canonical propose step does, and the chip leads line 1 in plan blue
+  planSay(bashUse('openspec new change "pr-flow-gate"'));
+  const planOut = await planRender();
+  assert.equal(planPhase(), 'Planification: pr-flow-gate', `propose did not set the phase: ${JSON.stringify(planPhase())}`);
+  assert.ok(planOut.startsWith('\x1b[1;38;5;111mPlanification'), `Planification chip not plan blue: ${JSON.stringify(planOut.slice(0, 40))}`);
+
+  // the phase is the model's again the moment it writes one, and a replay must not undo that: the
+  // tmp sidecar is swept, the whole transcript is re-derived, and the label on disk is newer. A
+  // minute of daylight, not a shared millisecond: the comparison is the subject, not clock grain.
+  setManual('Exec: build the thing', -1);
+  fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${PLAN_SESSION}.json`));
+  await planRender();
+  assert.equal(planPhase(), 'Exec: build the thing', `a replayed proposal overwrote a newer phase: ${JSON.stringify(planPhase())}`);
+
+  // proposing again is a real transition, so a newer event does win — including the same slug,
+  // and including the step that names an existing change instead of creating one
+  setManual('Exec: build the thing', 30);
+  planSay(propose(), bashUse('openspec status --change pr-flow-gate'));
+  await planRender();
+  assert.equal(planPhase(), 'Planification: pr-flow-gate', `re-proposing the same slug did not reactivate: ${JSON.stringify(planPhase())}`);
+
+  // a cancelled proposal stops arming: the next OpenSpec command is ordinary work
+  setManual('Exec: build the thing', 30);
+  planSay(propose(), userMsg('cancel that, wrong repo'), bashUse('openspec status --change pr-flow-gate'));
+  await planRender();
+  assert.equal(planPhase(), 'Exec: build the thing', `a cancelled proposal still activated: ${JSON.stringify(planPhase())}`);
+
+  // a clarification reply is part of proposing — even one that is only the slug — so the arm holds
+  planSay(propose(), userMsg('pr-flow-gate'), bashUse('openspec new change pr-flow-gate'));
+  await planRender();
+  assert.equal(planPhase(), 'Planification: pr-flow-gate', `a clarification reply dropped the proposal: ${JSON.stringify(planPhase())}`);
+
+  // a subagent proposing something is not this session's phase
+  setManual('Exec: build the thing', 30);
+  planSay(propose(',"isSidechain":true'), bashUse('openspec new change side-change', at(), ',"isSidechain":true'));
+  await planRender();
+  assert.equal(planPhase(), 'Exec: build the thing', `a subagent proposal moved the phase: ${JSON.stringify(planPhase())}`);
+
+  // an event dated in the future would outrank a label written before it comes round, so a replay
+  // could then overwrite that label: no honest clock, no activation
+  setManual('Exec: build the thing', 30);
+  planSay(propose(), bashUse('openspec new change future-change', at(30)));
+  await planRender();
+  assert.equal(planPhase(), 'Exec: build the thing', `a future-dated event activated: ${JSON.stringify(planPhase())}`);
+
+  // a write that fails keeps the activation pending, and the retry has to land on a render that
+  // has nothing new to read
+  setManual('Exec: build the thing', 30);
+  fs.chmodSync(planFile, 0o444);
+  planSay(propose(), bashUse('openspec new change retried-change'));
+  await planRender();
+  assert.equal(planPhase(), 'Exec: build the thing', `an unwritable phase file was somehow written: ${JSON.stringify(planPhase())}`);
+  fs.chmodSync(planFile, 0o644);
+  await planRender();
+  assert.equal(planPhase(), 'Planification: retried-change', `a failed activation was not retried: ${JSON.stringify(planPhase())}`);
+
 
   // intelligence score + effort formatting: e.g. "Gemini 3.7 Flash [high·56]"
   const intRender = await render({
@@ -439,4 +528,6 @@ main()
     try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-phase-${SESSION}.json`)); } catch {}
     try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${SESSION}.json`)); } catch {}
     try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${CACHE_SESSION}.json`)); } catch {}
+    try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-phase-${PLAN_SESSION}.json`)); } catch {}
+    try { fs.unlinkSync(path.join(os.tmpdir(), `ccs-tps-${PLAN_SESSION}.json`)); } catch {}
   });

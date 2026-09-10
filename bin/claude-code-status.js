@@ -109,53 +109,6 @@ process.stdin.on('end', () => {
     // Read once: the phase chip renders it, and the change picker below reads the subject to tell which
     // of several open changes is the one actually being worked.
     const focusFile = session ? path.join(os.homedir(), '.claude', 'session-context', session) : '';
-    const focus = (() => {
-      if (!focusFile) return '';
-      try {
-        const buf = fs.readFileSync(focusFile);
-        // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
-        return (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
-          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
-      } catch { return ''; }
-    })();
-    const sessionCtx = (() => {
-      if (!focus) return '';
-      try {
-        const f = focusFile;
-        const t = trunc(focus, 48);
-        // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
-        const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, 'review-plan': 141, exec: 220,
-                        'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
-                        debug: 203, fix: 203, focus: 213, chat: 117, docs: 109,
-                        'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
-        const m = t.match(/^([\p{L}\d&-]+):\s*(.*)/u);
-        if (!m) return t;
-        const c = PHASE[m[1].toLowerCase()] || 250; // unknown phase labels allowed (dynamic pipelines) — bold grey
-        // Measured across 38 real sessions (median 134min, 4 phase writes): the label is >15min out
-        // of date 57% of the wall clock, because the subject survives a whole pipeline and the phase
-        // does not. So the file's mtime is shown once the label has stood a while — the same number
-        // answers "is this still true?" and "has it been stuck on this?" — and the label dims once it
-        // is old enough to be a guess. The subject keeps full brightness: it is the half that holds.
-        // Time in phase has to survive an acknowledgement. Both hooks tell the model to `touch` a
-        // label that is still right, which resets mtime — so mtime alone would restart this clock
-        // every time the nudge fires and the age would never reach the 20-minute floor. Track when
-        // the text last *changed*; mtime is only the seed the first time a label is seen.
-        let since = fs.statSync(f).mtimeMs;
-        const seen = path.join(os.tmpdir(), `ccs-phase-${session.replace(/[^\w.-]+/g, '_')}.json`);
-        let prev = null;
-        try { prev = JSON.parse(fs.readFileSync(seen, 'utf8')); } catch {}
-        // a touch bumps mtime without changing the label, so the older of the two is the honest start
-        if (prev && prev.text === t) since = Math.min(prev.since, since);
-        if (!prev || prev.text !== t || prev.since !== since) {
-          try { fs.writeFileSync(seen, JSON.stringify({ text: t, since })); } catch {}
-        }
-        const mins = Math.round((Date.now() - since) / 60000);
-        const style = `\x1b[${mins >= 90 ? 2 : 1};${c === 226 ? '7;' : ''}38;5;${c}m`; // 226 = waiting on the user: a chip you can spot from another tab
-        const age = mins >= 20 ? ` ${dur(mins)}` : '';
-        return `${style}${m[1]}\x1b[0;38;5;245m${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age
-
-      } catch { return ''; }
-    })();
 
     // A selection is remembered without discarding the one before it. `/opsx:propose new-id` is
     // recorded before it creates its directory, and dropping the change you were on the moment that
@@ -195,6 +148,43 @@ process.stdin.on('end', () => {
       for (const m of s.matchAll(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/g)) if (!DUMMY_IDS.has(m[0].toLowerCase())) seen.add(m[0]);
       return seen.size === 1 ? [...seen][0] : '';
     };
+    // The two canonical steps of `/opsx:propose` that name the slug it just chose: creating the
+    // change, or asking an existing one for its artifact order. Anchored at the start of the
+    // command the tool actually runs, so a wrapper (`npx openspec …`), a `cd … &&`, an `echo`, or
+    // an option carrying a quoted example can never be mistaken for a run.
+    const FIRE_NEW = /^\s*openspec\s+new\s+change\s+(["']?)([a-z0-9][\w.-]*)\1(?=\s|$)/i;
+    const FIRE_STATUS = /^\s*openspec\s+status\s+--change[\s=]+(["']?)([a-z0-9][\w.-]*)\1(?=\s|$)/i;
+    const fireSlug = s => {
+      if (typeof s !== 'string') return '';
+      const m = FIRE_NEW.exec(s) || FIRE_STATUS.exec(s);
+      const id = m?.[2] || '';
+      return id && !DUMMY_IDS.has(id.toLowerCase()) ? id : '';
+    };
+    const CANCELLED = /^(cancel|cancela|abort|never\s*mind|nevermind|olv[ií]dalo)\b/i;
+    // The slash-command envelope Claude Code writes as a record of its own, anchored at its start:
+    // a paste or a doc that merely quotes `<command-name>` somewhere in its body is not a command.
+    const INVOKED = /^<command-message>[^<]*<\/command-message>\s*<command-name>\s*\/(opsx:[\w-]+)\s*<\/command-name>/i;
+    // An event's own clock, and only when it is honest: a timestamp in the future would outrank a
+    // label you write before it comes round, so a replay could then overwrite your phase.
+    const eventAt = ts => {
+      const at = Date.parse(ts);
+      return at > 0 && at <= Date.now() + 60000 ? at : 0;
+    };
+    // The one phase this tool writes itself: `/opsx:propose` is the only transition with a
+    // machine-readable trigger. Every other label is the model's, so the write is guarded by the
+    // file's own mtime — an event older than what is on disk is a replay (a swept sidecar, a
+    // resumed session) and must lose, while proposing again, even the same slug, is a newer event
+    // and wins. Returns false only when the write itself failed, which is what makes it retried.
+    const activate = pend => {
+      try {
+        if (fs.statSync(focusFile).mtimeMs >= pend.at) return true;
+      } catch {}                                     // no phase file yet — this is the first label
+      try {
+        fs.mkdirSync(path.dirname(focusFile), { recursive: true });
+        fs.writeFileSync(focusFile, `Planification: ${pend.slug}\n`);
+        return true;
+      } catch { return false; }
+    };
 
     // One incremental pass over the transcript, answering two things: how many output tokens this
     // session has produced (rendered as tok/s below), and which OpenSpec change it is actually
@@ -213,7 +203,7 @@ process.stdin.on('end', () => {
       // arithmetic can never be corrected incrementally — it has to be recounted from zero, and
       // nothing in its numbers reveals which rule produced them. That is how a mid-session change
       // once left a 517k session reading 1.1k forever.
-      const st = { v: 3, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [] };
+      const st = { v: 4, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [], arm: false, pend: null };
       if (!d.transcript_path) return st;
       try {
         // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
@@ -227,6 +217,7 @@ process.stdin.on('end', () => {
           // off > size: the file shrank, so it is a different transcript. v mismatch: older arithmetic.
           if (prev.v === st.v && prev.off <= size) Object.assign(st, prev);
         } catch {}
+        let dirty = false;
         if (size > st.off) {
           const fd = fs.openSync(d.transcript_path, 'r');
           const buf = Buffer.allocUnsafe(size - st.off);
@@ -269,8 +260,18 @@ process.stdin.on('end', () => {
               // it arrives as `<command-name>/opsx:apply</command-name>\n<command-args>the-id</command-args>`,
               // so the command and the id it was handed are never adjacent, and the tag names are
               // themselves hyphenated words that make every command look like it names two changes.
-              const t = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n').replace(/<\/?[a-z-]+>/gi, ' ');
+              const raw = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('\n');
+              const t = raw.replace(/<\/?[a-z-]+>/gi, ' ');
               if (!t) continue;                              // tool results only — not a turn of yours
+              // Which workflow is running, by identity and not by mention: the envelope is what
+              // Claude Code writes for a slash command, so prose or documentation quoting
+              // `/opsx:propose` can neither start a proposal nor end one. Anything that is not a
+              // command leaves the arm alone — a proposal legitimately asks for scope first, and
+              // the reply to that question is often the slug itself. What does end it: another
+              // workflow, an explicit cancellation, or you running the OpenSpec command yourself.
+              const invoked = raw.trimStart().match(INVOKED);
+              if (invoked) st.arm = invoked[1].toLowerCase() === 'opsx:propose';
+              else if (CANCELLED.test(raw.trimStart()) || fireSlug(raw)) st.arm = false;
               const pc = pathChange(t);
               const cmd = cmdChange(t);
               const dir = pc.dir ? path.resolve(cwd, pc.dir, 'openspec', 'changes') : '';
@@ -286,19 +287,80 @@ process.stdin.on('end', () => {
                 const id = cmd || pc.id;
                 const dir = pc.dir ? path.resolve(cwd, pc.dir, 'openspec', 'changes') : '';
                 if (id) keep(st, id, dir);
+                // The slug is committed the moment an armed proposal runs one of its two canonical
+                // OpenSpec commands. The command string only: a docs example sitting in a `read`
+                // path or a grep pattern is text, not a run.
+                if (st.arm && /^(bash|shell)$/i.test(b.name || '')) {
+                  const slug = fireSlug(b.input?.command);
+                  if (slug) {
+                    st.arm = false;
+                    const when = eventAt(o.timestamp);
+                    st.pend = when ? { slug, at: when } : null;   // no honest clock, no activation
+                  }
+                }
               }
             }
             // Ids are kept without checking that the directory exists: `/opsx:propose new-id` is
             // scanned before the directory it creates, and these bytes are never read twice.
             // Whether one is real is settled where the change is picked, on every render.
           }
-          if (cut) {
-            st.off += cut;
-            try { fs.writeFileSync(cache, JSON.stringify(st)); } catch {}
-          }
+          if (cut) { st.off += cut; dirty = true; }
         }
+        // Activation sits outside the "new bytes" branch on purpose: a failed write keeps `pend`,
+        // so its retry has to land on a later render that has nothing new to read.
+        if (st.pend && focusFile && activate(st.pend)) { st.pend = null; dirty = true; }
+        if (dirty) try { fs.writeFileSync(cache, JSON.stringify(st)); } catch {}
       } catch {}
       return st;
+    })();
+
+    // Read after the scan: activating Planification above is what this render then displays.
+    const focus = (() => {
+      if (!focusFile) return '';
+      try {
+        const buf = fs.readFileSync(focusFile);
+        // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
+        return (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
+          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
+      } catch { return ''; }
+    })();
+    const sessionCtx = (() => {
+      if (!focus) return '';
+      try {
+        const f = focusFile;
+        const t = trunc(focus, 48);
+        // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
+        const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, planification: 111, 'review-plan': 141, exec: 220,
+                        'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
+                        debug: 203, fix: 203, focus: 213, chat: 117, docs: 109,
+                        'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
+        const m = t.match(/^([\p{L}\d&-]+):\s*(.*)/u);
+        if (!m) return t;
+        const c = PHASE[m[1].toLowerCase()] || 250; // unknown phase labels allowed (dynamic pipelines) — bold grey
+        // Measured across 38 real sessions (median 134min, 4 phase writes): the label is >15min out
+        // of date 57% of the wall clock, because the subject survives a whole pipeline and the phase
+        // does not. So the file's mtime is shown once the label has stood a while — the same number
+        // answers "is this still true?" and "has it been stuck on this?" — and the label dims once it
+        // is old enough to be a guess. The subject keeps full brightness: it is the half that holds.
+        // Time in phase has to survive an acknowledgement. Both hooks tell the model to `touch` a
+        // label that is still right, which resets mtime — so mtime alone would restart this clock
+        // every time the nudge fires and the age would never reach the 20-minute floor. Track when
+        // the text last *changed*; mtime is only the seed the first time a label is seen.
+        let since = fs.statSync(f).mtimeMs;
+        const seen = path.join(os.tmpdir(), `ccs-phase-${session.replace(/[^\w.-]+/g, '_')}.json`);
+        let prev = null;
+        try { prev = JSON.parse(fs.readFileSync(seen, 'utf8')); } catch {}
+        // a touch bumps mtime without changing the label, so the older of the two is the honest start
+        if (prev && prev.text === t) since = Math.min(prev.since, since);
+        if (!prev || prev.text !== t || prev.since !== since) {
+          try { fs.writeFileSync(seen, JSON.stringify({ text: t, since })); } catch {}
+        }
+        const mins = Math.round((Date.now() - since) / 60000);
+        const style = `\x1b[${mins >= 90 ? 2 : 1};${c === 226 ? '7;' : ''}38;5;${c}m`; // 226 = waiting on the user: a chip you can spot from another tab
+        const age = mins >= 20 ? ` ${dur(mins)}` : '';
+        return `${style}${m[1]}\x1b[0;38;5;245m${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age
+
+      } catch { return ''; }
     })();
 
     // active OpenSpec change (the /opsx:propose → apply → archive loop). Several can be open at once —
