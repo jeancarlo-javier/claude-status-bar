@@ -689,8 +689,11 @@ process.stdin.on('end', () => {
         // ponytail: 18 fits a Warp tab with ~7 open; raise if it looks clipped with fewer
         const title = `${sym ? `${sym} ` : ''}${trunc(subject, 18)}`;
         const titleFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.title`);
-        let prev = ''; try { prev = fs.readFileSync(titleFile, 'utf8'); } catch {}
-        if (title !== prev) {
+        // Re-sent when the title changes or the phase file was touched since the last send: Warp
+        // drops program titles on a hand-renamed tab, so "update your phase" is also the refresh.
+        let prev = '', stale = false;
+        try { prev = fs.readFileSync(titleFile, 'utf8'); stale = fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
+        if (title !== prev || stale) {
           let pid = process.ppid, tty = '';
           for (let i = 0; i < 6 && pid > 1; i++) {
             tty = execSync(`ps -o tty= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
