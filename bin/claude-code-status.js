@@ -365,6 +365,7 @@ process.stdin.on('end', () => {
 
     // active OpenSpec change (the /opsx:propose → apply → archive loop). Several can be open at once —
     // the one whose tasks.md was touched last is the one being worked. No tasks.md = proposal not expanded yet.
+    let changeId = '';
     const change = (() => {
       try {
         const candidateDirs = [];
@@ -440,6 +441,7 @@ process.stdin.on('end', () => {
         const best = all[0];
         if (!best) return '';
         const isSelected = best.f > 0;
+        if (isSelected) changeId = best.c;
         // Two dimensions, two channels, no extra width: the hue is where the change is in its own
         // lifecycle — blue proposing (no tasks.md yet, same blue as the Planification phase), cyan
         // being applied, green every box ticked — and the weight is whether this session chose it
@@ -669,6 +671,37 @@ process.stdin.on('end', () => {
     limitStat('wk', rl?.seven_day, 10080);
     if (tps) L2.push(tps);
 
+    // Warp/iTerm tab title. Only when Claude Code has stopped writing its own (it would overwrite
+    // this within a turn). stdout is a pipe, so the title goes to the TTY of the nearest ancestor
+    // that has one — the claude process. Written only on change: OSC every 5s is noise on the pty.
+    if (process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE && session && process.platform !== 'win32') {
+      try {
+        // "▶ landing-tracking-par…" on a change, "⚠ DB schema migration" off one. Phase as a symbol
+        // up front so a ⚠ reads from across the window. Same keys as PHASE above; unknown phases
+        // keep 3 letters. Kept short enough to fit: Warp clips the active tab from the left.
+        const SYM = { research: '🔍', explore: '🔍', analysis: '🔍', plan: '✎', planification: '✎', 'review-plan': '✎?',
+                      exec: '▶', 'q&a': '?', review: '?', 'review-execution': '?', critique: '?', verify: '✔', done: '✓',
+                      debug: '🐛', fix: '🐛', focus: '◎', chat: '💬', docs: '📄',
+                      'necesita-revisión': '⚠', 'necesita-revision': '⚠', 'needs-review': '⚠', confirma: '⚠', revisa: '⚠' };
+        const m = focus.match(/^([\p{L}\d&-]+):\s*(.*)/u);
+        const sym = m ? SYM[m[1].toLowerCase()] || m[1].slice(0, 3) : '';
+        const subject = changeId || (m ? m[2] : focus) || dir;
+        // ponytail: 18 fits a Warp tab with ~7 open; raise if it looks clipped with fewer
+        const title = `${sym ? `${sym} ` : ''}${trunc(subject, 18)}`;
+        const titleFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.title`);
+        let prev = ''; try { prev = fs.readFileSync(titleFile, 'utf8'); } catch {}
+        if (title !== prev) {
+          let pid = process.ppid, tty = '';
+          for (let i = 0; i < 6 && pid > 1; i++) {
+            tty = execSync(`ps -o tty= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+            if (tty && tty !== '??') break;
+            pid = Number(execSync(`ps -o ppid= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+            tty = '';
+          }
+          if (tty) { fs.writeFileSync(`/dev/${tty}`, `\x1b]0;${title}\x07`); fs.writeFileSync(titleFile, title); }
+        }
+      } catch {}
+    }
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);
   } catch (e) {}
 });

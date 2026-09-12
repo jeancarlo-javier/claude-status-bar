@@ -149,6 +149,16 @@ acknowledgement and this segment would never reach its 20-minute floor. The rend
 earlier of the two under `$TMPDIR`, so a touch confirms the phase without erasing how long it has
 run.
 
+### Terminal tab title
+
+Opt in with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in your shell profile (Claude Code otherwise
+rewrites the tab every turn). The renderer then names the tab after the phase and what is being
+worked: `▶ landing-tracking-par…` on a change, `⚠ auth review` off one. The phase is a symbol up
+front — `✎` plan, `▶` exec, `?` review, `✔` verify, `✓` done, `🐛` debug, `⚠` needs review — so a
+wait for you reads from across the window. Capped at 18 characters: Warp clips the active tab
+from the left. Works in Warp and Ghostty; anything that honours OSC 0 should. Written only when
+the text changes, to the TTY of the `claude` process. Off on Windows, silent on any failure.
+
 ## What the two lines show
 
 ```
