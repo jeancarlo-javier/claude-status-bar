@@ -1,5 +1,5 @@
 {
-  "description": "claude-status-bar: phase-file nudge and stop guard",
+  "description": "claude-status-bar: phase-file nudge, stop guard, subagent effort + phase capture",
   "hooks": {
     "SessionStart": [
       {
@@ -27,6 +27,26 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-context-guard.js\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-effort.js\""
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-effort.js\""
           }
         ]
       }

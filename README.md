@@ -66,6 +66,12 @@ Clone it to ~/.claude/claude-status-bar, then wire it in ~/.claude/settings.json
 - Stop hook → hooks/session-context-guard.js
 - UserPromptSubmit hook → hooks/session-context-nudge.js
 
+Optional, for the agent panel (each subagent row shows its model, the effort it actually runs
+at, and the phase the subagent writes about itself):
+- subagentStatusLine → bin/subagent-status.js
+- PreToolUse hook (no matcher) → hooks/subagent-effort.js
+- SubagentStart hook → hooks/subagent-effort.js
+
 Plus append the rule from docs/global-claude-rule.md to ~/.claude/CLAUDE.md.
 Verify it renders, then tell me to restart.
 ````
@@ -79,6 +85,8 @@ Verify it renders, then tell me to restart.
 | `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. On the missing branch — the first turn of a session — it also deletes phase files older than 30 days. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per turn) if the phase file was never written, still holds the example template, or has not changed in 30 minutes — the deterministic enforcement layer. The block offers `touch` for a line that is still right, so keeping an honest label is cheaper than inventing one. |
+| `bin/subagent-status.js` | Agent panel renderer (`subagentStatusLine` command, not a hook). Rewrites each subagent row: `[name]  phase-or-description … Model [effort·score] · elapsed · ↓ tokens`. Phase comes from `~/.claude/session-context/<session_id>.<agent_id>.phase`, effort from `….agent.json`; without them the row shows Claude's description and no effort — never the session's. |
+| `hooks/subagent-effort.js` | `PreToolUse` (no matcher) + `SubagentStart` hook. Inside a subagent, `PreToolUse` records the effort Claude actually applied (after its silent per-model downgrade) to `….agent.json`; `SubagentStart` returns `additionalContext` telling the subagent the exact `….phase` path to write — it has no agent id of its own in the environment. Silent, never blocks. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
 | `.claude-plugin/` | Plugin and marketplace manifests, so the repo installs as a Claude Code plugin. |
 | `hooks/hooks.json` | Wires all three hooks automatically when installed as a plugin. |
