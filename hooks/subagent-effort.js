@@ -11,7 +11,7 @@
 // is the parent's. The panel row then shows the phase the subagent writes instead of the task
 // description.
 //
-// Silent; never blocks anything.
+// Never blocks anything; PreToolUse speaks only while a subagent's phase file is missing.
 const fs = require('fs'), os = require('os'), path = require('path');
 let s = '';
 process.stdin.on('data', d => s += d).on('end', () => {
@@ -30,11 +30,15 @@ process.stdin.on('data', d => s += d).on('end', () => {
         fs.writeFileSync(f, next, { mode: 0o600 });
       }
     }
-    if (inp.hook_event_name !== 'SubagentStart') return;
     const phase = path.join(dir, `${sid}.${aid}.phase`);
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStart', additionalContext:
-      `Keep ${phase} holding your current workflow phase + subject, format \`Phase: subject\` (subject ≤6 words), ` +
-      'e.g. `Exec: port auth to JWT`, `Verify: auth tests`. Rewrite it at every phase transition: ' +
-      `echo "Exec: port auth to JWT" > ${phase} — it renders in the user's agent panel; just write it, never mention it.` } }));
+    const say = (event, text) => process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }));
+    if (inp.hook_event_name === 'SubagentStart') return say('SubagentStart',
+      `Before any other tool call, write your current workflow phase + subject to ${phase}, format ` +
+      '`Phase: subject` (subject ≤6 words), e.g. `Exec: port auth to JWT`, `Verify: auth tests`. Rewrite it at every ' +
+      `phase transition: echo "Exec: port auth to JWT" > ${phase} — it renders in the user's agent panel; just write it, never mention it.`);
+    // The SubagentStart line alone is often ignored where no CLAUDE.md rule backs it (e.g. a second
+    // CLAUDE_CONFIG_DIR): repeat it on each tool call until the file exists, then stay silent.
+    // ponytail: nags every call while missing; count per agent if an agent that never complies gets noisy
+    if (!fs.existsSync(phase)) say('PreToolUse', `Write your phase first: echo "Phase: subject" > ${phase} (subject ≤6 words), then rewrite it at each phase transition.`);
   } catch {}
 });

@@ -51,12 +51,15 @@ try {
   // main thread: agent_id absent → nothing recorded
   assert.equal(run(HOOK, { session_id: SESSION, effort: { level: 'medium' } }), '');
   assert.ok(!fs.existsSync(ctx), 'the main thread must not be recorded as an agent');
-  assert.equal(run(HOOK, { session_id: SESSION, agent_id: 'a', agent_type: 'general-purpose', effort: { level: 'medium' } }), '', 'the hook must stay silent');
+  // no phase file yet → the subagent is reminded where to write it
+  const nudge = JSON.parse(run(HOOK, { session_id: SESSION, agent_id: 'a', agent_type: 'general-purpose', effort: { level: 'medium' } }));
+  assert.equal(nudge.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.ok(nudge.hookSpecificOutput.additionalContext.includes(path.join(ctx, 'sess-rows.a.phase')), 'the reminder must name the exact phase path');
   // b was configured xhigh but Claude downgraded it for the model: the applied level wins
   run(HOOK, { session_id: SESSION, agent_id: 'b', agent_type: 'code-reviewer', effort: { level: 'high' } });
   run(HOOK, { session_id: 'sess-other', agent_id: 'c', agent_type: 'general-purpose', effort: { level: 'low' } });
   run(HOOK, { session_id: '../escape', agent_id: 'c', effort: { level: 'low' } });
-  assert.deepEqual(fs.readdirSync(ctx).sort(), ['sess-other.c.agent.json', 'sess-rows.a.agent.json', 'sess-rows.b.agent.json']);
+  assert.deepEqual(fs.readdirSync(ctx).filter(f => !f.endsWith('.phase')).sort(), ['sess-other.c.agent.json', 'sess-rows.a.agent.json', 'sess-rows.b.agent.json']);
 
   r = rows({ session_id: SESSION, columns: 120, tasks });
   assert.ok(plain(r[0].content).startsWith('Sonnet low idle 5 min'), plain(r[0].content));
@@ -88,7 +91,8 @@ try {
   assert.equal(start.hookSpecificOutput.hookEventName, 'SubagentStart');
   assert.ok(start.hookSpecificOutput.additionalContext.includes(phaseFile), 'the subagent must be told the exact phase path');
   assert.ok(!fs.existsSync(path.join(ctx, 'sess-rows.p.agent.json')));
-  assert.equal(run(HOOK, { session_id: SESSION, agent_id: 'q', agent_type: 'x', effort: { level: 'low' } }), '', 'PreToolUse must stay silent');
+  fs.writeFileSync(path.join(ctx, 'sess-rows.q.phase'), 'Exec: q\n');
+  assert.equal(run(HOOK, { session_id: SESSION, agent_id: 'q', agent_type: 'x', effort: { level: 'low' } }), '', 'PreToolUse must stay silent once the phase exists');
   const prow = () => plain(rows({ session_id: SESSION, columns: 120, tasks: [
     { id: 'p', label: 'Find the auth wiring', startTime: now - 5000, model: 'claude-sonnet-5', tokenCount: 1000 },
   ] })[0].content);
