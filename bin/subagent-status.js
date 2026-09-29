@@ -13,6 +13,7 @@ process.removeAllListeners('warning');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const scoreFor = require('./intelligence');
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -24,9 +25,6 @@ process.stdin.on('end', () => {
     const width = Number.isFinite(d.columns) ? d.columns : 120;
     const strip = s => String(s ?? '').replace(/[\x00-\x1f\x7f-\x9f]/g, '').replace(/\[.*?\]/g, '').trim();
 
-    // The same cache claude-code-status.js builds from the OMP catalog, for the `·66` score.
-    let scores = {};
-    try { scores = JSON.parse(fs.readFileSync(path.join(os.tmpdir(), 'claude-model-int-cache.json'), 'utf8')); } catch {}
     // Per-agent files, keyed <session>.<agent_id>:
     //   .agent.json — the effort the subagent itself reported (after Claude's silent per-model
     //                 downgrade), written by hooks/subagent-effort.js. Absent until the agent's
@@ -57,10 +55,10 @@ process.stdin.on('end', () => {
       if (typeof t?.id !== 'string' || !/^[\w-]+$/.test(t.id)) continue;
       const id = strip(t.model);
       const own = sid ? ownOf(t.id) : {};
-      // OMP omits Haiku 4.5's score; claude-code-status.js pins it to 30, so the row must agree
-      const score = scores[id.toLowerCase()] ?? (/^claude-haiku-4-5(-\d+)?$/.test(id) ? 30 : undefined);
       const effort = own.effort ?? t.effort;
-      const tag = [effort != null && effortName(effort), Number.isFinite(score) && Math.round(score)].filter(x => x !== false);
+      const eName = effort != null && effortName(effort);
+      const sc = scoreFor(eName, id);
+      const tag = [eName, sc && `${sc.approx ? '≤' : ''}${Math.round(sc.score)}`].filter(Boolean);
       const model = (id ? modelName(id) : '…') + (tag.length ? ` [${tag.join('·')}]` : '');
       const left = [t.name, own.phase || strip(t.label || t.description)].filter(Boolean).join('  ');
       const right = `${model} · ${elapsed(Date.now() - (t.startTime || Date.now()))} · ↓ ${tokens(t.tokenCount || 0)} tokens`;

@@ -13,8 +13,9 @@ const HOOK = path.join(__dirname, '..', 'hooks', 'subagent-effort.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sas-test-'));
 const home = path.join(tmp, 'home');
 const ctx = path.join(home, '.claude', 'session-context');
-// the intelligence score comes from the cache the main renderer leaves in the tmp dir
-fs.writeFileSync(path.join(tmp, 'claude-model-int-cache.json'), JSON.stringify({ 'claude-sonnet-5': 55.3 }));
+// scores come from the committed data/intelligence.json snapshot; expectations read it, so a refresh doesn't break them
+const M = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models;
+const sc = (k, e) => Math.round(M[k][e]);
 const SESSION = 'sess-rows';
 
 const run = (bin, payload) => spawnSync(process.execPath, [bin], {
@@ -38,13 +39,13 @@ try {
   let r = rows({ session_id: SESSION, columns: 120, tasks });
   assert.equal(r.length, 3, 'a row without an id must be left to Claude');
   assert.ok(plain(r[0].content).startsWith('Sonnet low idle 5 min'), plain(r[0].content));
-  assert.ok(plain(r[0].content).endsWith('Sonnet 5 [55] · 5s · ↓ 41.5k tokens'), plain(r[0].content));
+  assert.ok(plain(r[0].content).endsWith(`Sonnet 5 [≤${sc('sonnet-5', 'max')}] · 5s · ↓ 41.5k tokens`), plain(r[0].content));
   // the model is the one bright thing on the right; the counters keep the native dim
-  assert.ok(r[0].content.includes('Sonnet 5 [55]\x1b[2m · 5s · ↓ 41.5k tokens\x1b[0m'), JSON.stringify(r[0].content));
+  assert.ok(r[0].content.includes(`Sonnet 5 [≤${sc('sonnet-5', 'max')}]\x1b[2m · 5s · ↓ 41.5k tokens\x1b[0m`), JSON.stringify(r[0].content));
   assert.equal(plain(r[0].content).length, 120, 'right edge must sit on the last column');
   // configured effort is all the panel knows about b; variant suffix stripped; name kept
   assert.ok(plain(r[1].content).startsWith('Reviewer  Reading modal wiring'), plain(r[1].content));
-  assert.ok(plain(r[1].content).endsWith('Opus 5 [xhigh] · 1m 35s · ↓ 93.2k tokens'), plain(r[1].content));
+  assert.ok(plain(r[1].content).endsWith(`Opus 5 [xhigh·${sc('opus-5', 'xhigh')}] · 1m 35s · ↓ 93.2k tokens`), plain(r[1].content));
   assert.ok(plain(r[2].content).startsWith('Booting') && plain(r[2].content).endsWith('… · 0s · ↓ 0 tokens'), plain(r[2].content));
 
   // ---- the hook fires inside the subagents ----
@@ -63,20 +64,20 @@ try {
 
   r = rows({ session_id: SESSION, columns: 120, tasks });
   assert.ok(plain(r[0].content).startsWith('Sonnet low idle 5 min'), plain(r[0].content));
-  assert.ok(plain(r[0].content).endsWith('Sonnet 5 [med·55] · 5s · ↓ 41.5k tokens'), plain(r[0].content));
+  assert.ok(plain(r[0].content).endsWith(`Sonnet 5 [med·${sc('sonnet-5', 'medium')}] · 5s · ↓ 41.5k tokens`), plain(r[0].content));
   assert.ok(plain(r[1].content).startsWith('Reviewer  Reading modal wiring'), plain(r[1].content));
-  assert.ok(plain(r[1].content).endsWith('Opus 5 [high] · 1m 35s · ↓ 93.2k tokens'), plain(r[1].content));
+  assert.ok(plain(r[1].content).endsWith(`Opus 5 [high·${sc('opus-5', 'high')}] · 1m 35s · ↓ 93.2k tokens`), plain(r[1].content));
   assert.ok(plain(r[2].content).startsWith('Booting'), 'another session\'s record leaked into this one: ' + plain(r[2].content));
 
   // Haiku 4.5 has no effort parameter: the hook input carries no effort → nothing to record,
-  // and the score is the same pinned 30 the main bar shows
+  // and the score is its model-wide one
   run(HOOK, { session_id: SESSION, agent_id: 'h', agent_type: 'general-purpose' });
   assert.ok(!fs.existsSync(path.join(ctx, 'sess-rows.h.agent.json')), 'no effort, no record');
   const haiku = plain(rows({ session_id: SESSION, columns: 120, tasks: [
     { id: 'h', label: 'Haiku low sleep 5m', startTime: now - 33000, model: 'claude-haiku-4-5', tokenCount: 28500 },
   ] })[0].content);
   assert.ok(haiku.startsWith('Haiku low sleep 5m'), haiku);
-  assert.ok(haiku.endsWith('Haiku 4.5 [30] · 33s · ↓ 28.5k tokens'), haiku);
+  assert.ok(haiku.endsWith(`Haiku 4.5 [${sc('haiku-4.5', '*')}] · 33s · ↓ 28.5k tokens`), haiku);
 
   // a second tool call at the same level is not a second write
   const mtime = fs.statSync(path.join(ctx, 'sess-rows.a.agent.json')).mtimeMs;

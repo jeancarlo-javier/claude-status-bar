@@ -7,8 +7,12 @@
 Two-line Claude Code status line. The headline feature: the session's live **workflow
 phase** (`Plan:`, `Exec:`, `Verify:`, …) and its subject, color-coded and rewritten by the
 model itself as the work progresses. The rest is the session context you want on screen
-anyway. When the local OMP model catalog supplies a score, the model segment adds
-`[effort·intelligence]`; only `medium` is shortened, to `med`.
+anyway. For Claude models the model segment adds `[effort·intelligence]`, the
+[Artificial Analysis](https://artificialanalysis.ai/) score **at that effort** (`Opus 5.5 [med·51]`,
+`[max·58]`). A model with only a max score shows it as an upper bound (`[high·≤32]`). Only `medium`
+is shortened, to `med`. Scores live in `data/intelligence.json`; refresh them with
+`node bin/refresh-intelligence.js`, which syncs a local tinkuy
+checkout (`TINKUY_DIR`, needs its `AA_API_KEY`) — the status bar itself never depends on it.
 
 ![status line showing the session phase](assets/statusline.png)
 
@@ -85,6 +89,7 @@ Verify it renders, then tell me to restart.
 | `bin/claude-code-status.js` | Status line renderer (`statusLine` command, not a hook). Reads `~/.claude/session-context/<session_id>`, parses `Phase: subject`, renders it color-coded. |
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. On the missing branch — the first turn of a session — it also deletes phase files older than 30 days. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per turn) if the phase file was never written, still holds the example template, or has not changed in 30 minutes — the deterministic enforcement layer. The block offers `touch` for a line that is still right, so keeping an honest label is cheaper than inventing one. |
+| `bin/intelligence.js` · `data/intelligence.json` · `bin/refresh-intelligence.js` | Per-effort score lookup shared by both renderers, its committed snapshot, and the maintainer script that regenerates it. |
 | `bin/subagent-status.js` | Agent panel renderer (`subagentStatusLine` command, not a hook). Rewrites each subagent row: `[name]  phase-or-description … Model [effort·score] · elapsed · ↓ tokens`. Phase comes from `~/.claude/session-context/<session_id>.<agent_id>.phase`, effort from `….agent.json`; without them the row shows Claude's description and no effort — never the session's. |
 | `hooks/subagent-effort.js` | `PreToolUse` (no matcher) + `SubagentStart` hook. Inside a subagent, `PreToolUse` records the effort Claude actually applied (after its silent per-model downgrade) to `….agent.json`; `SubagentStart` returns `additionalContext` telling the subagent the exact `….phase` path to write — it has no agent id of its own in the environment. Silent, never blocks. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |

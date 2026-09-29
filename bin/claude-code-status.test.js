@@ -464,38 +464,32 @@ async function main() {
   assert.equal(planPhase(), 'Planification: retried-change', `a failed activation was not retried: ${JSON.stringify(planPhase())}`);
 
 
-  // intelligence score + effort formatting: e.g. "Gemini 3.7 Flash [high·56]"
-  const intRender = await render({
-    ...JSON.parse(STDIN_JSON),
-    model: { id: 'gemini-3.7-flash', display_name: 'Gemini 3.7 Flash' },
-    effort: 'high',
-  });
-  const intPlain = intRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
-  assert.ok(intPlain.includes('Gemini 3.7 Flash [high·56]'), `intelligence badge missing: ${JSON.stringify(intPlain)}`);
-  assert.ok(intRender.includes('\x1b[38;5;51m56\x1b[0m'), `frontier intelligence score not electric cyan: ${JSON.stringify(intRender)}`);
+  // per-effort intelligence score from data/intelligence.json: e.g. "Claude Opus 5.5 [med·51]"
+  const M = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models;
+  const sc = (k, e) => Math.round(M[k][e]);
+  const strip = s => s.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  const withModel = (id, name, effort) => render({ ...JSON.parse(STDIN_JSON), model: { id, display_name: name }, effort });
 
-  // only medium is shortened: medium -> med
-  const medRender = await render({
-    ...JSON.parse(STDIN_JSON),
-    model: { id: 'gemini-3.7-flash', display_name: 'Gemini 3.7 Flash' },
-    effort: 'medium',
-  });
-  assert.ok(medRender.includes('Gemini 3.7 Flash \x1b[38;5;245m[\x1b[0m\x1b[38;2;108;184;110mmed\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;51m56\x1b[0m\x1b[38;5;245m]\x1b[0m'), 'medium was not abbreviated to med');
+  // same model, different effort, different score; only medium is shortened to med
+  const opusMed = await withModel('claude-opus-5-5', 'Claude Opus 5.5', 'medium');
+  assert.ok(strip(opusMed).includes(`Claude Opus 5.5 [med·${sc('opus-5.5', 'medium')}]`), `med score wrong: ${JSON.stringify(strip(opusMed))}`);
+  const opusMax = await withModel('claude-opus-5-5', 'Claude Opus 5.5', 'max');
+  assert.ok(strip(opusMax).includes(`Claude Opus 5.5 [max·${sc('opus-5.5', 'max')}]`), `max score wrong: ${JSON.stringify(strip(opusMax))}`);
+  assert.notEqual(sc('opus-5.5', 'medium'), sc('opus-5.5', 'max'));
+  // colour follows the score: Opus 5.5 max is 58 -> electric cyan; Sonnet 5.5 med is 41 -> green
+  assert.ok(opusMax.includes(`\x1b[38;5;51m${sc('opus-5.5', 'max')}\x1b[0m`), 'frontier score not electric cyan');
+  const sonMed = await withModel('claude-sonnet-5-5', 'Claude Sonnet 5.5', 'medium');
+  assert.ok(sonMed.includes('\x1b[38;5;245m[\x1b[0m\x1b[38;2;108;184;110mmed\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;114m41\x1b[0m'), 'medium was not abbreviated / colored');
 
-  const xhighRender = await render({
-    ...JSON.parse(STDIN_JSON),
-    model: { id: 'claude-opus-4-6', display_name: 'Claude Opus 4.6' },
-    effort: 'xhigh',
-  });
-  assert.ok(xhighRender.includes('Claude Opus 4.6 \x1b[38;5;245m[\x1b[0m\x1b[38;2;179;136;244mxhigh\x1b[0m\x1b[38;5;245m·\x1b[0m\x1b[38;5;114m39\x1b[0m\x1b[38;5;245m]\x1b[0m'), 'xhigh was unexpectedly abbreviated');
-
-  const haikuRender = await render({
-    ...JSON.parse(STDIN_JSON),
-    model: { id: 'claude-haiku-4-5', display_name: 'Claude Haiku 4.5' },
-    effort: 'high',
-  });
-  const haikuPlain = haikuRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
-  assert.ok(haikuPlain.includes('Claude Haiku 4.5 [high·30]'), `Haiku 4.5 intelligence score missing: ${JSON.stringify(haikuPlain)}`);
+  // a model with only a max score gets it as an upper bound at any other effort
+  const opus46 = await withModel('claude-opus-4-6', 'Claude Opus 4.6', 'xhigh');
+  assert.ok(strip(opus46).includes(`Claude Opus 4.6 [xhigh·≤${sc('opus-4.6', 'max')}]`), `fallback missing: ${JSON.stringify(strip(opus46))}`);
+  // a model without effort tiers ("*") scores the same at every effort
+  const haiku = await withModel('claude-haiku-4-5', 'Claude Haiku 4.5', 'high');
+  assert.ok(strip(haiku).includes(`Claude Haiku 4.5 [high·${sc('haiku-4.5', '*')}]`), `Haiku 4.5 score missing: ${JSON.stringify(strip(haiku))}`);
+  // non-Claude models have no score, just the effort
+  const gem = await withModel('gemini-3.7-flash', 'Gemini 3.7 Flash', 'high');
+  assert.ok(strip(gem).includes('Gemini 3.7 Flash [high]'), `non-Claude model got a score: ${JSON.stringify(strip(gem))}`);
   // ---- prompt-cache accounting, and the sidecar that outlives a counting change ----
   // Claude Code caches every prompt, so `input_tokens` is a residue of 2 while the real input
   // rides in cache_creation_input_tokens. Counting input+output alone read a 517k session as

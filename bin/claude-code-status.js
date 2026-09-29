@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
+const scoreFor = require('./intelligence');
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -472,84 +473,16 @@ process.stdin.on('end', () => {
     })();
 
     // ---- Intelligence score lookup and coloring ----
-    const colorIntelligence = (score) => {
-      if (score == null || !Number.isFinite(score)) return '';
+    const colorIntelligence = (score, approx) => {
       const s = Math.round(score);
       let c = '\x1b[38;5;245m'; // < 20: Economy / fast (muted slate grey)
       if (s >= 60)      c = '\x1b[38;5;201m'; // >= 60: Next-Gen Reasoning (Magenta)
       else if (s >= 50) c = '\x1b[38;5;51m';  // 50-59: Cutting-Edge Frontier (Electric Cyan)
       else if (s >= 35) c = '\x1b[38;5;114m'; // 35-49: Flagship Reasoning (Emerald Green)
       else if (s >= 20) c = '\x1b[38;5;220m'; // 20-34: Balanced Mid-tier (Amber Gold)
-      return `${c}${s}\x1b[0m`;
+      return `${c}${approx ? '≤' : ''}${s}\x1b[0m`;
     };
 
-    const getModelIntelligence = (modelId, modelName) => {
-      const dbPath = path.join(os.homedir(), '.omp', 'agent', 'models.db');
-      const cachePath = path.join(os.tmpdir(), 'claude-model-int-cache.json');
-      let map = null;
-
-      if (fs.existsSync(cachePath)) {
-        try {
-          const cacheMtime = fs.statSync(cachePath).mtimeMs;
-          const dbMtime = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : 0;
-          if (cacheMtime >= dbMtime) {
-            map = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-          }
-        } catch {}
-      }
-
-      if (!map && fs.existsSync(dbPath)) {
-        map = {};
-        try {
-          const { DatabaseSync } = require('node:sqlite');
-          const db = new DatabaseSync(dbPath, { readOnly: true });
-          const rows = db.prepare('SELECT models FROM model_cache').all();
-          for (const r of rows) {
-            try {
-              const list = JSON.parse(r.models);
-              for (const m of list) {
-                if (typeof m.int === 'number' && Number.isFinite(m.int)) {
-                  const bareId = m.id.includes('/') ? m.id.split('/').pop() : m.id;
-                  const cleanId = bareId.replace(/\[.*?\]/g, '').replace(/:thinking.*?$/g, '').trim().toLowerCase();
-                  map[m.id.toLowerCase()] = m.int;
-                  map[bareId.toLowerCase()] = m.int;
-                  map[cleanId] = m.int;
-                  if (m.name) {
-                    map[m.name.toLowerCase()] = m.int;
-                    map[m.name.toLowerCase().replace(/\s*\([^)]*\)\s*$/, '')] = m.int;
-                  }
-                }
-              }
-            } catch {}
-          }
-          db.close();
-          try { fs.writeFileSync(cachePath, JSON.stringify(map)); } catch {}
-        } catch {}
-      }
-
-      const clean = (s) => (s || '').replace(/\[.*?\]/g, '').replace(/:thinking.*?$/g, '').replace(/^.*?\//, '').trim().toLowerCase();
-      if (map) {
-        if (modelId) {
-          const val = map[modelId.toLowerCase()] ?? map[clean(modelId)];
-          if (val !== undefined) return val;
-        }
-        if (modelName) {
-          const val = map[modelName.toLowerCase()] ?? map[clean(modelName)];
-          if (val !== undefined) return val;
-        }
-      }
-
-      // OMP omits `int` for Haiku 4.5; AA Intelligence Index v4.1.1 scores its reasoning variant at 30.
-      const isHaiku45 = (value) => {
-        const key = clean(value)
-          .replace(/\s*\([^)]*\)\s*$/, '')
-          .replace(/^anthropic[.-]/, '')
-          .replace(/\./g, '-')
-          .replace(/\s+/g, '-');
-        return /^(?:claude-)?(?:haiku-4-5|4-5-haiku)(?:-\d+)?$/.test(key);
-      };
-      return [modelId, modelName].some(isHaiku45) ? 30 : null;
-    };
 
     const formatCompactTokens = (num) => {
       if (!Number.isFinite(num) || num <= 0) return '0';
@@ -611,8 +544,8 @@ process.stdin.on('end', () => {
           : `${effortColorMap[effortShort] || '\x1b[38;5;245m'}${effortShort}\x1b[0m`)
       : '';
 
-    const intScore = getModelIntelligence(d.model?.id, d.model?.display_name || model);
-    const intStr = intScore != null ? colorIntelligence(intScore) : '';
+    const intScore = scoreFor(effortShort, d.model?.id, d.model?.display_name || model);
+    const intStr = intScore ? colorIntelligence(intScore.score, intScore.approx) : '';
 
     const ob = '\x1b[38;5;245m[\x1b[0m';
     const cb = '\x1b[38;5;245m]\x1b[0m';
