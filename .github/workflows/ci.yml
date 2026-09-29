@@ -24,6 +24,7 @@ jobs:
         run: |
           node bin/claude-code-status.test.js
           node bin/subagent-status.test.js
+          node bin/ccs-find.test.js
           node hooks/session-context-guard.test.js
           node hooks/session-context-nudge.test.js
 
