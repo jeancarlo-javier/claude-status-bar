@@ -90,6 +90,7 @@ Verify it renders, then tell me to restart.
 | `hooks/session-context-nudge.js` | `UserPromptSubmit` hook. Silent while the phase file is fresh (<10 min); injects a short reminder when it's stale or missing. On the missing branch — the first turn of a session — it also deletes phase files older than 30 days. |
 | `hooks/session-context-guard.js` | `Stop` hook. Blocks turn completion (max once per turn) if the phase file was never written, still holds the example template, or has not changed in 30 minutes — the deterministic enforcement layer. The block offers `touch` for a line that is still right, so keeping an honest label is cheaper than inventing one. |
 | `bin/intelligence.js` · `data/intelligence.json` · `bin/refresh-intelligence.js` | Per-effort score lookup shared by both renderers, its committed snapshot, and the maintainer script that regenerates it. |
+| `bin/ccs-find.js` | Resolves a session tag (`a3f9`) back to its full session id — the most recently active match — and prints project, phase and how many older sessions share the tag. |
 | `bin/subagent-status.js` | Agent panel renderer (`subagentStatusLine` command, not a hook). Rewrites each subagent row: `[name]  phase-or-description … Model [effort·score] · elapsed · ↓ tokens`. Phase comes from `~/.claude/session-context/<session_id>.<agent_id>.phase`, effort from `….agent.json`; without them the row shows Claude's description and no effort — never the session's. |
 | `hooks/subagent-effort.js` | `PreToolUse` (no matcher) + `SubagentStart` hook. Inside a subagent, `PreToolUse` records the effort Claude actually applied (after its silent per-model downgrade) to `….agent.json`; `SubagentStart` returns `additionalContext` telling the subagent the exact `….phase` path to write — it has no agent id of its own in the environment. Silent, never blocks. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
@@ -162,6 +163,24 @@ acknowledgement and this segment would never reach its 20-minute floor. The rend
 earlier of the two under `$TMPDIR`, so a touch confirms the phase without erasing how long it has
 run.
 
+### Session tag
+
+Line 1 opens with `#a3f9`: the first four hex digits of the session id, in dim grey. It is the
+id's own prefix, so nothing is stored to resolve it — transcripts are already named
+`<session_id>.jsonl`:
+
+```bash
+node bin/ccs-find.js a3f9            # full id on stdout; project · phase · age on stderr
+claude --resume "$(node bin/ccs-find.js a3f9)"
+```
+
+Four hex digits collide within a few weeks, so the match with the **most recent activity** wins —
+the tag you just read on a bar is almost always that one — and `(+N older)` says when there were
+others; a longer prefix (`a3f91c`) picks one out. Activity, not creation: resuming an old session
+makes it the answer again. `/clear` starts a new session, so it gets a new tag. From another
+session, "look at what we did in #a3f9" is enough: the same lookup is
+`ls -t ~/.claude/projects/*/a3f9*.jsonl | head -1`, which needs no path to this plugin.
+
 ### Terminal tab title
 
 Opt in with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` in your shell profile (Claude Code otherwise
@@ -175,13 +194,13 @@ the text changes, to the TTY of the `claude` process. Off on Windows, silent on 
 ## What the two lines show
 
 ```
-Exec 40m: Compact the status bar | Fable 5 [xhigh·66] | claude-status-bar@master | 55m
+#a3f9 Exec 40m: Compact the status bar | Fable 5 [xhigh·66] | claude-status-bar@master | 55m
 chg add-compact-gauges 2/4 | $3.12 | 517k↓34k | ctx ▁ 8% | 5h~2h ▃ 35% | wk~3d ▆ 71%
 ```
 
 | Line | Shows |
 |------|-------|
-| 1 | **phase: subject** first, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model with `[effort·intelligence]`, `project@branch` (`↑↓` vs upstream), elapsed minutes |
+| 1 | the dim **session tag** `#a3f9`, then **phase: subject**, since it is the thing you actually read, with time-in-phase once the label is 20 min old; then model with `[effort·intelligence]`, `project@branch` (`↑↓` vs upstream), elapsed minutes |
 | 2 | the OpenSpec change being worked and its task progress, session cost, tokens this session spent (`↓` = tokens RTK saved), context window used (the same number `/context` reports), 5-hour and weekly rate limits, output tokens per second |
 
 Each meter is one glyph off the `▁▂▃▄▅▆▇█` ramp plus its number, colored together —

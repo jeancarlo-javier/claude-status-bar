@@ -570,6 +570,12 @@ process.stdin.on('end', () => {
     }
     // The phase is the headline feature, so it leads instead of trailing five ambient segments.
     if (sessionCtx) L1.unshift(sessionCtx);
+    // "#a3f9" — the session id's own first four hex digits, so it needs no store to resolve:
+    // transcripts are named <session_id>.jsonl and bin/ccs-find.js picks the most recent match.
+    // Glued to the first segment rather than a section of its own; an id that is not a UUID
+    // has no honest prefix to show, so it shows nothing.
+    const sid = /^[0-9a-f]{4}/i.exec(session)?.[0];
+    if (sid) L1[0] = `\x1b[38;5;245m#${sid.toLowerCase()}\x1b[0m ${L1[0]}`;
 
     // ---- Line 2 (stats joined by |) ----
     const L2 = [];

@@ -20,7 +20,7 @@ const out = path.join(ROOT, 'assets', 'statusline.svg');
 const PAYLOAD = {
   model: { id: 'claude-opus-5', display_name: 'Opus 5 (1M context)' },
   effort: 'xhigh',
-  session_id: 'screenshot',
+  session_id: 'a3f91c07-5e2b-4d8a-9f10-3c8e2d6b7a41',   // a real UUID shape, so the #a3f9 tag shows
   workspace: { current_dir: null },   // filled in with a throwaway demo project below
   context_window: { remaining_percentage: 62 },
   cost: { total_cost_usd: 3.12, total_duration_ms: 840000, total_api_duration_ms: 120000 },

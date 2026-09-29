@@ -525,6 +525,22 @@ async function main() {
   const staleL2 = (await render(cachePayload)).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[1];
   assert.ok(staleL2.includes('30.8k'), `unversioned sidecar was trusted instead of recounted: ${JSON.stringify(staleL2)}`);
 
+  // session tag: a UUID's first four hex digits, dim, glued before the phase — and before the model
+  // when there is no phase yet. A non-UUID id has no prefix to resolve, so nothing is shown.
+  const UUID = 'A3F91C07-5e2b-4d8a-9f10-' + String(Date.now()).slice(-12).padStart(12, '0');
+  const uuidFile = path.join(home, '.claude', 'session-context', UUID);
+  fs.writeFileSync(uuidFile, 'Exec: tag the session\n');
+  const uuidRender = await render({ ...JSON.parse(STDIN_JSON), session_id: UUID });
+  const uuidL1 = uuidRender.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  assert.ok(uuidL1.startsWith('#a3f9 Exec: tag the session |'), `session tag not before the phase: ${JSON.stringify(uuidL1)}`);
+  assert.ok(uuidRender.startsWith('\x1b[38;5;245m#a3f9\x1b[0m '), `session tag not dim: ${JSON.stringify(uuidRender)}`);
+  fs.rmSync(uuidFile);
+  const bareL1 = (await render({ ...JSON.parse(STDIN_JSON), session_id: UUID })).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  assert.ok(bareL1.startsWith('#a3f9 M '), `session tag not before the model without a phase: ${JSON.stringify(bareL1)}`);
+  const plainL1 = (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  assert.ok(!plainL1.startsWith('#'), `non-UUID session id grew a tag: ${JSON.stringify(plainL1)}`);
+  for (const k of ['phase', 'tps']) fs.rmSync(path.join(os.tmpdir(), `ccs-${k}-${UUID}.json`), { force: true });
+
   console.log('ALL TESTS PASSED');
 }
 
