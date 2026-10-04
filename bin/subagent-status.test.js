@@ -69,6 +69,17 @@ try {
   assert.ok(plain(r[1].content).endsWith(`Opus 5 [high·${sc('opus-5', 'high')}] · 1m 35s · ↓ 93.2k tokens`), plain(r[1].content));
   assert.ok(plain(r[2].content).startsWith('Booting'), 'another session\'s record leaked into this one: ' + plain(r[2].content));
 
+  // a per-request override the hook never sees (the /subagent mod pins effort in turn.step): the
+  // subagent's transcript records the level each request carried, and the last one wins
+  const transcript = path.join(tmp, 'proj', `${SESSION}.jsonl`);
+  const agentLog = path.join(tmp, 'proj', SESSION, 'subagents', 'agent-b.jsonl');
+  fs.mkdirSync(path.dirname(agentLog), { recursive: true });
+  fs.writeFileSync(agentLog, '{"type":"assistant","effort":"low","perTurnEffort":"medium"}\n{"type":"user"}\n{"type":"assistant","effort":"low","perTurnEffort":"low"}\n');
+  r = rows({ session_id: SESSION, transcript_path: transcript, columns: 120, tasks });
+  assert.ok(plain(r[1].content).endsWith(`Opus 5 [low·${sc('opus-5', 'low')}] · 1m 35s · ↓ 93.2k tokens`), plain(r[1].content));
+  // no transcript for a: the hook's record still holds
+  assert.ok(plain(r[0].content).endsWith(`Sonnet 5 [med·${sc('sonnet-5', 'medium')}] · 5s · ↓ 41.5k tokens`), plain(r[0].content));
+
   // Haiku 4.5 has no effort parameter: the hook input carries no effort → nothing to record,
   // and the score is its model-wide one
   run(HOOK, { session_id: SESSION, agent_id: 'h', agent_type: 'general-purpose' });

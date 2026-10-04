@@ -7,8 +7,9 @@
 //
 // Claude hands every visible row on stdin (`tasks[]` with id, model, effort, label, startTime,
 // tokenCount) and reads back one `{"id","content"}` JSON line per row to override. The row's
-// `effort` is only the configured value; the applied one and the agent's own phase come from
-// files hooks/subagent-effort.js arranges.
+// `effort` is only the configured value; the applied one comes from the subagent's transcript
+// (or, before its first request is written, hooks/subagent-effort.js's record), its own phase
+// from a file that hook arranges.
 process.removeAllListeners('warning');
 const fs = require('fs');
 const os = require('os');
@@ -38,6 +39,24 @@ process.stdin.on('end', () => {
       return rec;
     };
 
+    // The level the subagent's last request carried: each assistant row of its transcript records it as
+    // `perTurnEffort`. It wins over the hook's record, which holds the configured level and misses a
+    // per-request override (a plugin's turn.step, e.g. the /subagent mod's pin).
+    // Transcript: <main transcript minus .jsonl>/subagents/agent-<id>.jsonl.
+    // ponytail: reads the last 64 KB only; a longer last row falls back to the hook's record.
+    const tp = typeof d.transcript_path === 'string' && d.transcript_path.endsWith('.jsonl') ? d.transcript_path.slice(0, -6) : '';
+    const appliedOf = id => {
+      if (!tp) return undefined;
+      let fd;
+      try {
+        fd = fs.openSync(path.join(tp, 'subagents', `agent-${id}.jsonl`), 'r');
+        const size = fs.fstatSync(fd).size, len = Math.min(size, 65536), buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, size - len);
+        const all = [...buf.toString('utf8').matchAll(/"perTurnEffort":"([a-z]+)"/g)];
+        return all.length ? all[all.length - 1][1] : undefined;
+      } catch { return undefined; } finally { if (fd !== undefined) fs.closeSync(fd); }
+    };
+
     // "claude-sonnet-5" / "claude-fable-5-1[1m]" -> "Sonnet 5" / "Fable 5.1"; anything else as-is.
     const modelName = id => {
       const m = id.match(/^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/i);
@@ -55,7 +74,7 @@ process.stdin.on('end', () => {
       if (typeof t?.id !== 'string' || !/^[\w-]+$/.test(t.id)) continue;
       const id = strip(t.model);
       const own = sid ? ownOf(t.id) : {};
-      const effort = own.effort ?? t.effort;
+      const effort = appliedOf(t.id) ?? own.effort ?? t.effort;
       const eName = effort != null && effortName(effort);
       const sc = scoreFor(eName, id);
       const tag = [eName, sc && `${sc.approx ? '≤' : ''}${Math.round(sc.score)}`].filter(Boolean);
