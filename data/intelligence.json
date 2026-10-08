@@ -1,6 +1,6 @@
 {
  "source": "https://artificialanalysis.ai/",
- "fetched_at": "2026-09-29T00:34:56.132Z",
+ "fetched_at": "2026-10-08T02:03:13.927Z",
  "models": {
   "opus-4": {
    "*": 20.6
@@ -26,6 +26,13 @@
    "high": 51.2,
    "xhigh": 53.2,
    "max": 53.4
+  },
+  "haiku-5.5": {
+   "low": 29.4,
+   "medium": 34.5,
+   "high": 37.8,
+   "xhigh": 41.2,
+   "max": 43.4
   },
   "opus-4.5": {
    "*": 29.1
@@ -64,9 +71,9 @@
    "max": 38.2
   },
   "sonnet-5.5": {
-   "low": 35.8,
-   "medium": 40.7,
-   "high": 46.7,
+   "low": 35.9,
+   "medium": 40.8,
+   "high": 46.8,
    "xhigh": 51.9,
    "max": 56
   }
