@@ -13,6 +13,8 @@ fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
 process.env.HOME = home;
 
 const BIN = path.join(__dirname, 'claude-code-status.js');
+// stands in for the claude process's tty: tab titles and colors land here, not in the terminal running the tests
+const ttyFile = path.join(home, 'tty');
 
 // two content-block lines share one requestId (1000 tokens counted once), plus a second request of 200
 const transcript = path.join(home, 'transcript.jsonl');
@@ -65,7 +67,7 @@ const STDIN_JSON = JSON.stringify({
 function render(payload = STDIN_JSON) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, CCS_TTY: ttyFile },
       cwd: home,
     });
     let out = '';
@@ -540,6 +542,31 @@ async function main() {
   const plainL1 = (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
   assert.ok(!plainL1.startsWith('#'), `non-UUID session id grew a tag: ${JSON.stringify(plainL1)}`);
   for (const k of ['phase', 'tps']) fs.rmSync(path.join(os.tmpdir(), `ccs-${k}-${UUID}.json`), { force: true });
+
+  // Warp tab color: a phase that wants you points the tab at its color folder (OSC 7), a busy one
+  // back at the cwd; a color is re-sent once its last send is a minute old.
+  const colorFile = path.join(home, '.claude', 'session-context', `${SESSION}.tabcolor`);
+  const yellowDir = path.join(home, '.warp', 'tab-colors', 'yellow');
+  const yellowMirror = path.join(yellowDir, home);  // the cwd mirrored inside the color folder
+  const osc7 = dir => `\x1b]7;file://${os.hostname()}${dir.split('/').map(encodeURIComponent).join('/')}\x07`;
+  const sent = async () => { fs.writeFileSync(ttyFile, ''); await render(); return fs.readFileSync(ttyFile, 'utf8'); };
+  const term = process.env.TERM_PROGRAM;
+  process.env.TERM_PROGRAM = 'WarpTerminal';
+  setPhase('Necesita-Revisión: pick a color');
+  assert.ok(!(await sent()).includes('tab-colors'), 'tab colored with no color folder installed');
+  fs.mkdirSync(yellowDir, { recursive: true });
+  assert.ok((await sent()).includes(osc7(yellowMirror)), 'needs-review did not point the tab at the cwd mirror in the yellow folder');
+  assert.ok(fs.statSync(yellowMirror).isDirectory(), 'cwd mirror not created');
+  assert.ok(!(await sent()).includes('\x1b]7;'), 'unchanged color re-sent within the minute');
+  fs.utimesSync(colorFile, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
+  assert.ok((await sent()).includes(osc7(yellowMirror)), 'color not re-sent after a minute');
+  setPhase('Exec: pick a color');
+  assert.ok((await sent()).includes(osc7(home)), 'busy phase did not clear the tab color');
+  assert.ok(!(await sent()).includes('\x1b]7;'), 'uncolored tab re-sent its cwd');
+  delete process.env.TERM_PROGRAM;
+  setPhase('Needs-Review: pick a color');
+  assert.ok(!(await sent()).includes('\x1b]7;'), 'tab colored outside Warp');
+  if (term === undefined) delete process.env.TERM_PROGRAM; else process.env.TERM_PROGRAM = term;
 
   console.log('ALL TESTS PASSED');
 }

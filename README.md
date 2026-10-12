@@ -114,7 +114,7 @@ Canonical labels are English. Semantic palette (256-color):
 | `Q&A:` / `Review:` / `Review-Execution:` | 208 orange | questioning |
 | `Verify:` | 80 cyan | checking |
 | `Done:` | 114 green | finished |
-| `Debug:` / `Fix:` | 203 red | trouble |
+| `Debug:` / `Fix:` / `Blocked:` | 203 red | trouble |
 | `Focus:` | 213 pink | daily focus |
 | `Chat:` | 117 sky | conversation, no task |
 | `Docs:` | 109 slate | writing docs |
@@ -190,6 +190,40 @@ front — `✎` plan, `▶` exec, `?` review, `✔` verify, `✓` done, `🐛` d
 wait for you reads from across the window. Capped at 18 characters: Warp clips the active tab
 from the left. Works in Warp and Ghostty; anything that honours OSC 0 should. Written only when
 the text changes, to the TTY of the `claude` process. Off on Windows, silent on any failure.
+
+### Warp tab color
+
+In Warp the tab is also tinted by phase, only where the phase wants you: yellow for
+`Needs-Review:`, red for `Debug:` / `Fix:` / `Blocked:`, green for `Verify:` / `Done:`, blue for
+plans, magenta for `Q&A:` / `Review:` / `Critique:`. Working phases stay uncolored, so the tabs
+that need you stand out. Warp has no tab-color escape, so the tab reports (OSC 7) a mirror of its
+cwd inside a color folder, and Warp's directory tab colors do the rest. Two one-time steps:
+
+```sh
+mkdir -p ~/.warp/tab-colors/{red,green,yellow,blue,magenta}
+```
+
+```toml
+# ~/.warp/settings.toml (hot-reloaded; absolute paths)
+[appearance.tabs.directory_tab_colors]
+"/Users/<you>/.warp/tab-colors/red" = { color = "red" }
+"/Users/<you>/.warp/tab-colors/green" = { color = "green" }
+"/Users/<you>/.warp/tab-colors/yellow" = { color = "yellow" }
+"/Users/<you>/.warp/tab-colors/blue" = { color = "blue" }
+"/Users/<you>/.warp/tab-colors/magenta" = { color = "magenta" }
+```
+
+And one line in `~/.zshrc`: Warp opens new tabs and splits where the current tab last was, which
+for a colored tab is the mirror. This sends them to the real folder (home if it is gone):
+
+```zsh
+[[ $PWD == $HOME/.warp/tab-colors/*/* ]] && { cd "/${PWD#$HOME/.warp/tab-colors/*/}" 2>/dev/null || cd }
+```
+
+No color folder, no color: without the setup nothing is sent. The color clears when Claude exits
+(the shell prompt reports the real cwd) and is re-sent each minute while it holds. A tab given a
+color, or "no color", from Warp's menu ignores all this. How it was found:
+[research/2026-10-12-warp-tab-color.md](research/2026-10-12-warp-tab-color.md).
 
 ## What the two lines show
 

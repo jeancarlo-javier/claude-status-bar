@@ -325,16 +325,16 @@ process.stdin.on('end', () => {
           .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
       } catch { return ''; }
     })();
+    // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
+    const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, planification: 111, 'review-plan': 141, exec: 220,
+                    'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
+                    blocked: 203, debug: 203, fix: 203, focus: 213, chat: 117, docs: 109,
+                    'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
     const sessionCtx = (() => {
       if (!focus) return '';
       try {
         const f = focusFile;
         const t = trunc(focus, 48);
-        // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
-        const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, planification: 111, 'review-plan': 141, exec: 220,
-                        'q&a': 208, review: 208, 'review-execution': 208, critique: 208, verify: 80, done: 114,
-                        debug: 203, fix: 203, focus: 213, chat: 117, docs: 109,
-                        'necesita-revisión': 226, 'necesita-revision': 226, 'needs-review': 226, confirma: 226, revisa: 226 };
         const m = t.match(/^([\p{L}\d&-]+):\s*(.*)/u);
         if (!m) return t;
         const c = PHASE[m[1].toLowerCase()] || 250; // unknown phase labels allowed (dynamic pipelines) — bold grey
@@ -610,9 +610,26 @@ process.stdin.on('end', () => {
     limitStat('wk', rl?.seven_day, 10080);
     if (tps) L2.push(tps);
 
+    // stdout is a pipe, so tab escapes go to the TTY of the nearest ancestor that has one — the
+    // claude process. Looked up once, on the first write.
+    // CCS_TTY overrides it: the tests point it at a file, or they would retitle and recolor the tab they run in.
+    let tty = process.env.CCS_TTY;
+    const toTty = seq => {
+      if (tty === undefined) {
+        let pid = process.ppid;
+        tty = '';
+        for (let i = 0; i < 6 && pid > 1; i++) {
+          const t = execSync(`ps -o tty= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          if (t && t !== '??') { tty = `/dev/${t}`; break; }
+          pid = Number(execSync(`ps -o ppid= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
+        }
+      }
+      if (tty) fs.appendFileSync(tty, seq);
+      return !!tty;
+    };
+
     // Warp/iTerm tab title. Only when Claude Code has stopped writing its own (it would overwrite
-    // this within a turn). stdout is a pipe, so the title goes to the TTY of the nearest ancestor
-    // that has one — the claude process. Written only on change: OSC every 5s is noise on the pty.
+    // this within a turn). Written only on change: OSC every 5s is noise on the pty.
     if (process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE && session && process.platform !== 'win32') {
       try {
         // "▶ landing-tracking-par…" on a change, "⚠ DB schema migration" off one. Phase as a symbol
@@ -620,7 +637,7 @@ process.stdin.on('end', () => {
         // keep 3 letters. Kept short enough to fit: Warp clips the active tab from the left.
         const SYM = { research: '🔍', explore: '🔍', analysis: '🔍', plan: '✎', planification: '✎', 'review-plan': '✎?',
                       exec: '▶', 'q&a': '?', review: '?', 'review-execution': '?', critique: '?', verify: '✔', done: '✓',
-                      debug: '🐛', fix: '🐛', focus: '◎', chat: '💬', docs: '📄',
+                      blocked: '⛔', debug: '🐛', fix: '🐛', focus: '◎', chat: '💬', docs: '📄',
                       'necesita-revisión': '⚠', 'necesita-revision': '⚠', 'needs-review': '⚠', confirma: '⚠', revisa: '⚠' };
         const m = focus.match(/^([\p{L}\d&-]+):\s*(.*)/u);
         const sym = m ? SYM[m[1].toLowerCase()] || m[1].slice(0, 3) : '';
@@ -632,16 +649,34 @@ process.stdin.on('end', () => {
         // drops program titles on a hand-renamed tab, so "update your phase" is also the refresh.
         let prev = '', stale = false;
         try { prev = fs.readFileSync(titleFile, 'utf8'); stale = fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
-        if (title !== prev || stale) {
-          let pid = process.ppid, tty = '';
-          for (let i = 0; i < 6 && pid > 1; i++) {
-            tty = execSync(`ps -o tty= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-            if (tty && tty !== '??') break;
-            pid = Number(execSync(`ps -o ppid= -p ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim());
-            tty = '';
-          }
-          if (tty) { fs.writeFileSync(`/dev/${tty}`, `\x1b]0;${title}\x07`); fs.writeFileSync(titleFile, title); }
-        }
+        if ((title !== prev || stale) && toTty(`\x1b]0;${title}\x07`)) fs.writeFileSync(titleFile, title);
+      } catch {}
+    }
+
+    // Warp tab color, only for the phases that want you (PHASE palette folded onto Warp's six colors):
+    // busy ones stay uncolored so those stand out. Warp has no tab-color sequence, but it colors a
+    // tab by its directory and takes that from OSC 7, so the tab is pointed at ~/.warp/tab-colors/<color>
+    // (mapped once under appearance.tabs.directory_tab_colors in ~/.warp/settings.toml) and back at
+    // the real cwd to clear. No folder for a color = no map installed = never colored.
+    // See research/2026-10-12-warp-tab-color.md.
+    if (process.env.TERM_PROGRAM === 'WarpTerminal' && session && process.platform !== 'win32') {
+      try {
+        const color = { 226: 'yellow', 203: 'red', 114: 'green', 80: 'green', 111: 'blue', 141: 'blue', 208: 'magenta' }
+          [PHASE[(focus.match(/^([\p{L}\d&-]+):/u)?.[1] || '').toLowerCase()]];
+        const colorDir = color && path.join(os.homedir(), '.warp', 'tab-colors', color);
+        // Not the color folder itself but a mirror of the cwd inside it (the map matches by prefix):
+        // Warp opens new tabs and splits in the folder a tab last reported, and a mirror keeps the
+        // real path, which the README's one-line zsh hook cds back to. '' = uncolored: nothing sent.
+        const want = colorDir && fs.existsSync(colorDir) ? path.join(colorDir, cwd) : '';
+        if (want) fs.mkdirSync(want, { recursive: true });
+        const colorFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.tabcolor`);
+        // A color is also re-sent each minute: anything else in the tab that reports a cwd (a shell,
+        // a test run, a resumed session) clears it behind the cache's back, and would leave it cleared for good.
+        let prev = '', age = Infinity;
+        try { prev = fs.readFileSync(colorFile, 'utf8'); age = Date.now() - fs.statSync(colorFile).mtimeMs; } catch {}
+        // Per segment, so a '#' or '?' in a path is not read as a fragment or query.
+        const url = (want || cwd).split('/').map(encodeURIComponent).join('/');
+        if ((want !== prev || (want && age > 60000)) && toTty(`\x1b]7;file://${os.hostname()}${url}\x07`)) fs.writeFileSync(colorFile, want);
       } catch {}
     }
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);
