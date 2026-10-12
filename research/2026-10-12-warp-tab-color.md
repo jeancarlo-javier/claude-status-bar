@@ -42,6 +42,13 @@ once, then point the tab at the folder of the color you want.
   none → magenta → green → none. A tab-strip screenshot after each step showed only that tab changing.
 - Warp's restore DB (`terminal_panes.cwd`) showed the OSC 7 path within seconds. `tabs.color` stayed
   NULL: a directory color is derived, not stored.
+- From this session's own tab (the claude process's tty), all six colors plus `white`, measured on the
+  tab strip (background tab, theme grey `#494949`): red `#594642`, yellow `#5b5444`, magenta `#554852`, blue
+  `#474f5a` read clearly; green `#48534b` is subtle; cyan `#515352` is barely distinguishable from grey, so it is
+  left unused. `white` renders as a clearly lighter tab.
+- New tabs open in the color folder (see *The new-tab folder problem*): a Cmd+T shell from a colored tab
+  had its cwd at the mirror path (`lsof -a -d cwd`), and with the zsh line below a tab opened there ended up
+  in the real folder, uncolored.
 
 ## Rules learned
 
@@ -50,18 +57,49 @@ once, then point the tab at the folder of the color you want.
 - The menu's ⊘ ("no color") stores `Cleared`. That **pins** the tab colorless, even after OSC 7 moves it to a
   mapped folder. The binary has a `ResetColor` action that probably un-pins it; this is unverified.
 - The directory map **matches by prefix**: mapping `~` colored every tab under home. That's why the color
-  folders are dedicated leaves.
+  folders are dedicated, and why any **real** folder under one is colored too (a folder named `a%2Fb` included).
+- Warp **resolves symlinks** before matching: OSC 7 to a symlink inside `yellow/` that points at the project
+  left the tab grey.
+- New sessions start where the active tab last was: `session.working_directory_config` defaults to
+  `previous_dir` for `new_tab`, `new_window` and `split_pane` (alternatives: `home_dir`, a custom dir).
 - Values are the 8 ANSI names (`black`…`white`), rendered with the active theme's colors. The menu offers 6 plus ⊘.
 - Settings changes apply live, with no cwd change needed. A menu click persists only to SQLite.
 
 ## Caveats
 
 - OSC 7 changes the directory Warp *thinks* the tab is in. New tabs and splits opened from that tab start in
-  the color folder, and session restore saves it.
+  the color folder, and session restore saves it. Solved below.
 - The shell's next prompt re-reports the real cwd, which drops the color. So the color holds while a
   long-running program (Claude Code) owns the tab, and clears itself when it exits. That fits session state.
 - Claude Code's Bash tool sandbox can write only to its own session's tty. Writing to another tab's
   tty needs the sandbox off.
+- Anything run inside a Claude session that walks up to the claude process's tty writes to **that tab**. The
+  statusline's own test suite did, run by subagents: it pointed the tab at a temp folder, the color vanished,
+  and the write-on-change cache never re-sent it. Hence `CCS_TTY` (tests write to a file) and the
+  once-a-minute re-send of an active color.
+- A phase label is written once per turn, so it goes stale both ways: `Exec` after the turn ended, or a
+  leftover `Needs-Review` while the session is working again. The label alone cannot color the tab.
+
+## The new-tab folder problem
+
+A tab opened from a colored tab (Cmd+T, a split, session restore) started **in** `~/.warp/tab-colors/<color>`:
+colored, and in the wrong folder, because the real cwd was lost.
+
+| Try | Colored? | New tab lands in |
+|---|---|---|
+| Leaf color folder (first version) | yes | the color folder, real cwd lost |
+| Symlink inside `yellow/` to the real folder | **no**, Warp resolves it first | — |
+| Real empty mirror `yellow/<real cwd>`, e.g. `yellow/Users/me/proj` | yes | the mirror, real path kept |
+| Warp setting `working_directory_config` → `home_dir` | — | home, for every tab, always |
+
+The mirror plus one line in `~/.zshrc` that leaves it:
+
+```zsh
+[[ $PWD == $HOME/.warp/tab-colors/*/* ]] && { cd "/${PWD#$HOME/.warp/tab-colors/*/}" 2>/dev/null || cd }
+```
+
+The new shell starts in the mirror, `cd`s to the real folder (home if it is gone), and its first prompt reports
+the real cwd, which clears the color. Session restore after a crash or quit while colored is covered the same way.
 
 ## Dead ends
 
@@ -90,17 +128,46 @@ once, then point the tab at the folder of the color you want.
   active tab's.
 - `open "warp://settings?q=<query>"` searches Settings without a click.
 
-## Integration point here (not built)
+## Built here
 
-`bin/claude-code-status.js` (~L615–645) already resolves the claude process's tty and writes OSC 0 on change,
-caching the last title in `~/.claude/session-context/<session>.title`. Tab color would go in the same spot:
-map phase → color (for example `needs-review` → yellow, `debug` → red, `verify` → green), write
-`\x1b]7;file://<host><home>/.warp/tab-colors/<color>\x07`, and cache it the same way.
+`bin/claude-code-status.js`, next to the tab title (commit `34776e9`, then follow-ups). It shares one tty
+lookup (`toTty`) with the title and writes `\x1b]7;file://<host><home>/.warp/tab-colors/<color><cwd>\x07`, path encoded per
+segment so `#` and `?` survive. The cache is `~/.claude/session-context/<session>.tabcolor`, and nothing is sent
+until a color is involved or when the color folder is missing (no setup, no escapes).
 
-Open points:
-- **Setup:** the `settings.toml` map is a one-time install step.
+What the session is doing decides the color. The transcript gives the turn state: a `system`/`turn_duration`
+record closes every finished turn, and a `[Request interrupted by user` message marks an Esc.
+
+| Tab | State |
+|---|---|
+| blue | a turn is running (any label; the default for unknown ones) |
+| magenta | a turn is running on `Research` / `Explore` / `Analysis` |
+| white | turn over, on a working label |
+| yellow | turn over, on `Needs-Review` (and Spanish forms), `Q&A`, `Chat` |
+| red | turn over, on `Blocked` |
+| green | turn over, on `Done` |
+
+Setup: the folders (`mkdir -p ~/.warp/tab-colors/{red,green,yellow,blue,magenta,white}`), their map in
+`settings.toml`, and the zsh line above. All of it is in the README.
+
+Still open:
 - **Pinned tabs:** tabs pinned `Cleared` or `Color(x)` ignore this.
-- **Clearing:** the cwd side effect is acceptable, or the color should be cleared on Stop.
+- **Waiting mid-turn:** Claude Code does not run the statusline while a dialog is open (permission prompt,
+  AskUserQuestion; probed in a real pty, 15 s gaps with no render), so no statusline signal can show it.
+  `hooks/tab-wait.js` on `PermissionRequest` (fires for every dialog, bypass mode included) turns the tab
+  yellow; the first render after the answer repaints the real state. Reaches users with the next release.
+
+Turn-state signals, measured over the local transcripts:
+- `turn_duration` closes 2,064 of 2,138 CLI turns; the rest are Esc'd, steered or killed. A Stop hook that
+  blocks writes none, so there is no white↔blue flicker.
+- `turn_duration` also carries `pendingBackgroundAgentCount` and `pendingWorkflowCount`: turn over with
+  background work pending reads as working. Background shells are not counted there; they are tracked from
+  launch to `<task-notification>`, servers excluded by wording, capped at 15 min.
+- Only a user record whose first text starts with `[Request interrupted by user` is an Esc (28 of 115
+  sightings were quotes). `<command-name>` / `<local-command-*>` / `<bash-*>` records and compaction summaries
+  never reach the model, so they change nothing.
+- `CLAUDE_PID` stamps the state, so a resumed or cleared session repaints at once instead of inheriting the
+  dead process's state.
 
 ## Sources
 
