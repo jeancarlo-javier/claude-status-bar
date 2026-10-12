@@ -76,6 +76,8 @@ at, and the phase the subagent writes about itself):
 - PreToolUse hook (no matcher) → hooks/subagent-effort.js
 - SubagentStart hook → hooks/subagent-effort.js
 
+Optional, in Warp with the tab colors set up: PermissionRequest hook → hooks/tab-wait.js
+
 Plus append the rule from docs/global-claude-rule.md to ~/.claude/CLAUDE.md.
 Verify it renders, then tell me to restart.
 ````
@@ -93,9 +95,10 @@ Verify it renders, then tell me to restart.
 | `bin/ccs-find.js` | Resolves a session tag (`a3f9`) back to its full session id — the most recently active match — and prints project, phase and how many older sessions share the tag. |
 | `bin/subagent-status.js` | Agent panel renderer (`subagentStatusLine` command, not a hook). Rewrites each subagent row: `[name]  phase-or-description … Model [effort·score] · elapsed · ↓ tokens`. Phase comes from `~/.claude/session-context/<session_id>.<agent_id>.phase`, effort from the subagent's transcript (`<transcript>/subagents/agent-<id>.jsonl`, the last request's `perTurnEffort`, so a per-request override such as the `/subagent` mod's shows), else `….agent.json`; without them the row shows Claude's description and no effort — never the session's. |
 | `hooks/subagent-effort.js` | `PreToolUse` (no matcher) + `SubagentStart` hook. Inside a subagent, `PreToolUse` records the effort Claude actually applied (after its silent per-model downgrade) to `….agent.json`; `SubagentStart` returns `additionalContext` telling the subagent the exact `….phase` path to write — it has no agent id of its own in the environment. Silent, never blocks. |
+| `hooks/tab-wait.js` | `PermissionRequest` hook. In Warp, turns the tab yellow while a dialog waits on you (tool approval, AskUserQuestion, plan approval) — the status line does not run then. Same gates as the tab color; silent, decides nothing. |
 | `docs/global-claude-rule.md` | The global CLAUDE.md rule that teaches the model the format and when to write. |
 | `.claude-plugin/` | Plugin and marketplace manifests, so the repo installs as a Claude Code plugin. |
-| `hooks/hooks.json` | Wires all three hooks automatically when installed as a plugin. |
+| `hooks/hooks.json` | Wires the hooks automatically when installed as a plugin. |
 | `hooks/plugin-setup.js` | `SessionStart` hook. Self-configures the status line and the CLAUDE.md rule on first launch; silent afterwards. |
 | `skills/init/SKILL.md` | `/claude-status-bar:init` — repair path, for switching from another status line or restoring a deleted rule. |
 
@@ -193,14 +196,30 @@ the text changes, to the TTY of the `claude` process. Off on Windows, silent on 
 
 ### Warp tab color
 
-In Warp the tab is also tinted by phase, only where the phase wants you: yellow for
-`Needs-Review:`, red for `Debug:` / `Fix:` / `Blocked:`, green for `Verify:` / `Done:`, blue for
-plans, magenta for `Q&A:` / `Review:` / `Critique:`. Working phases stay uncolored, so the tabs
-that need you stand out. Warp has no tab-color escape, so the tab reports (OSC 7) a mirror of its
+In Warp the tab is also tinted by what the session is doing, so it reads from across the window.
+Phase labels are written once per turn and go stale, so the transcript decides first: while a turn
+runs, or work it started is still running in the background, the tab says working; only once all
+of it has ended (finished or Esc) does the label say why.
+
+| Tab | State | When |
+|-----|-------|------|
+| blue | working | a turn is running, or it ended with background agents, workflows or shells still out (dev servers don't count) — any phase but the investigating ones, so a leftover `Needs-Review:` does not hold yellow |
+| magenta | investigating | the same, on `Research:` / `Explore:` / `Analysis:` |
+| yellow | waiting on you | a permission prompt or a question (AskUserQuestion, plan approval) is open, mid-turn too; or the turn is over, on `Needs-Review:` (and its Spanish forms), `Q&A:`, `Chat:` |
+| white | stopped | turn over, on a working or investigating phase (`Exec:`, `Plan:`, any unknown label…) |
+| red | blocked | turn over, on `Blocked:` |
+| green | done | turn over, on `Done:` |
+
+Claude Code does not run the status line while a dialog is open, so the open-dialog yellow comes
+from the plugin's `PermissionRequest` hook; answering it brings the transcript's state straight back.
+A local command (`/model`, `/compact`, `!ls`) does not count as work, and a resumed session starts
+out stopped whatever the last process was doing when it ended.
+
+No phase, no color. Warp has no tab-color escape, so the tab reports (OSC 7) a mirror of its
 cwd inside a color folder, and Warp's directory tab colors do the rest. Two one-time steps:
 
 ```sh
-mkdir -p ~/.warp/tab-colors/{red,green,yellow,blue,magenta}
+mkdir -p ~/.warp/tab-colors/{red,green,yellow,blue,magenta,white}
 ```
 
 ```toml
@@ -211,6 +230,7 @@ mkdir -p ~/.warp/tab-colors/{red,green,yellow,blue,magenta}
 "/Users/<you>/.warp/tab-colors/yellow" = { color = "yellow" }
 "/Users/<you>/.warp/tab-colors/blue" = { color = "blue" }
 "/Users/<you>/.warp/tab-colors/magenta" = { color = "magenta" }
+"/Users/<you>/.warp/tab-colors/white" = { color = "white" }
 ```
 
 And one line in `~/.zshrc`: Warp opens new tabs and splits where the current tab last was, which
@@ -221,7 +241,8 @@ for a colored tab is the mirror. This sends them to the real folder (home if it 
 ```
 
 No color folder, no color: without the setup nothing is sent. The color clears when Claude exits
-(the shell prompt reports the real cwd) and is re-sent each minute while it holds. A tab given a
+(the shell prompt reports the real cwd), is re-sent each minute while it holds, and is sent once by
+every new session or Claude process (`/clear`, `--resume`), so a tab never keeps the last one's. A tab given a
 color, or "no color", from Warp's menu ignores all this. How it was found:
 [research/2026-10-12-warp-tab-color.md](research/2026-10-12-warp-tab-color.md).
 

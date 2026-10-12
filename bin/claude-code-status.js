@@ -18,6 +18,7 @@ process.stdin.on('end', () => {
     const model = (d.model?.display_name || 'Claude').replace(/\s*\([^)]*\)\s*$/, ''); // "Opus 5 (1M context)" -> "Opus 5"
     const cwd = d.workspace?.current_dir || process.cwd();
     const session = d.session_id || '';
+    const me = process.env.CLAUDE_PID || '';  // the claude process running this render (set for its children)
 
     // One-cell fill gauge plus its number. The old 8-block bar only resolved to 12.5% steps, so a
     // single glyph off the same ramp is the same signal at a twelfth of the width, and the digits
@@ -187,6 +188,14 @@ process.stdin.on('end', () => {
       } catch { return false; }
     };
 
+    // A background shell that is a server, by how the model describes and writes it. Leaning wide
+    // on purpose: a job taken for a server only loses the "working" color, the status quo.
+    // ponytail: wording heuristic, plus a cap: a server it misses reads "working" for at most
+    // SHELL_MAX (job-like shells finished at p90 11 min, p99 29 min across 84 measured). Tracking
+    // the shell's pid would replace both, if the transcript ever carries it.
+    const SERVER = /\b(vite|serve|server|proxy|preview|nodemon|watch|runserver|http\.server|tail -f|dev|start)\b|--port\b/i;
+    const SHELL_MAX = 15 * 60000;
+
     // One incremental pass over the transcript, answering two things: how many output tokens this
     // session has produced (rendered as tok/s below), and which OpenSpec change it is actually
     // working — the only signal that says which change is *being worked* rather than which one
@@ -204,7 +213,7 @@ process.stdin.on('end', () => {
       // arithmetic can never be corrected incrementally — it has to be recounted from zero, and
       // nothing in its numbers reveals which rule produced them. That is how a mid-session change
       // once left a 517k session reading 1.1k forever.
-      const st = { v: 4, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [], arm: false, pend: null };
+      const st = { v: 7, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [], arm: false, pend: null, idle: false, bg: 0, pid: '', sh: {} };
       if (!d.transcript_path) return st;
       try {
         // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
@@ -218,6 +227,7 @@ process.stdin.on('end', () => {
           // off > size: the file shrank, so it is a different transcript. v mismatch: older arithmetic.
           if (prev.v === st.v && prev.off <= size) Object.assign(st, prev);
         } catch {}
+        if (st.pid !== me) st.sh = {};   // a resumed session: the last process's shells died with it
         let dirty = false;
         if (size > st.off) {
           const fd = fs.openSync(d.transcript_path, 'r');
@@ -245,6 +255,42 @@ process.stdin.on('end', () => {
             }
             let o;
             try { o = JSON.parse(line); } catch { continue; }
+            // Whether the turn is over (the Warp tab color stops saying "working"): Claude Code closes
+            // every finished turn with a turn_duration record (96.5% of 2,138 CLI turns; the rest are
+            // Esc'd or steered mid-turn), and a blocked Stop hook writes none. An Esc leaves the
+            // "[Request interrupted…" record instead — as a record of its own: the string inside a
+            // tool result or the model's prose (28 of 115 sightings) is someone quoting it. Anything
+            // the model writes, or a prompt it will answer, means it is working again. Not what
+            // never reaches the model: a local slash command and its output (`/model`, `/compact`,
+            // `!ls`) and the compaction summary — they left 24 of 457 sessions reading "working" for good.
+            // Each state is stamped with the claude process that was live when it was read: a resumed
+            // session is a new process that is waiting on you, whatever the last one was doing when
+            // it died (mid-turn, or with agents out). CLAUDE_PID is set by Claude Code for its
+            // children; without it the stamp is '' everywhere and the check is a no-op.
+            //
+            // Work the turn left running in the background also means "working": agents and
+            // workflows, which the turn_duration counts, and background shells, which it does not.
+            // A shell is pending from its launch until a <task-notification> names its tool use (as
+            // the queued prompt that wakes the model, usually). Not a server: it never finishes, and
+            // half the shells still running at a turn's end are one.
+            if (o.type === 'system' && o.subtype === 'turn_duration') {
+              st.idle = true, st.pid = me;
+              st.bg = (o.pendingBackgroundAgentCount || 0) + (o.pendingWorkflowCount || 0);
+            } else if (o.type === 'assistant' && !o.isSidechain) {
+              st.idle = false, st.pid = me;
+              for (const b of Array.isArray(o.message?.content) ? o.message.content : [])
+                if (b.type === 'tool_use' && b.name === 'Bash' && b.input?.run_in_background && !SERVER.test(`${b.input.description} ${b.input.command}`))
+                  st.sh[b.id] = eventAt(o.timestamp) || Date.now();
+            } else if (o.type === 'user' && !o.isMeta && !o.isSidechain && !o.isCompactSummary) {
+              const c = o.message?.content;
+              const t = typeof c === 'string' ? c : Array.isArray(c) && c[0]?.type === 'text' ? c[0].text || '' : '';
+              // bg = 0: only the count of the turn_duration right before counts, never a stale one
+              // an Esc'd turn (which writes none) would otherwise inherit.
+              if (!/^<(command-name|local-command-[\w-]+|bash-[\w-]+)>/.test(t))
+                st.idle = t.startsWith('[Request interrupted by user'), st.bg = 0, st.pid = me;
+              for (const b of Array.isArray(c) ? c : []) if (b.is_error) delete st.sh[b.tool_use_id];  // never launched (denied)
+            }
+            if (line.includes('<task-notification>')) for (const m of line.matchAll(/<tool-use-id>(\w+)</g)) delete st.sh[m[1]];
             // isMeta is the harness talking to the model (hook output, reminders); isSidechain is a
             // subagent. Neither one is you choosing a change to work on.
             if (o.isMeta || o.isSidechain || !o.message) continue;
@@ -653,30 +699,51 @@ process.stdin.on('end', () => {
       } catch {}
     }
 
-    // Warp tab color, only for the phases that want you (PHASE palette folded onto Warp's six colors):
-    // busy ones stay uncolored so those stand out. Warp has no tab-color sequence, but it colors a
-    // tab by its directory and takes that from OSC 7, so the tab is pointed at ~/.warp/tab-colors/<color>
-    // (mapped once under appearance.tabs.directory_tab_colors in ~/.warp/settings.toml) and back at
-    // the real cwd to clear. No folder for a color = no map installed = never colored.
-    // See research/2026-10-12-warp-tab-color.md.
+    // Warp tab color = what the session is doing, read from across the window: blue working (the
+    // default, so any new label counts as work), magenta investigating; once the turn is over,
+    // white stopped, yellow waiting on you, red blocked, green done. Warp has no tab-color sequence, but it colors a tab by its directory and
+    // takes that from OSC 7, so the tab is pointed into ~/.warp/tab-colors/<color> (mapped once under
+    // appearance.tabs.directory_tab_colors in ~/.warp/settings.toml) and back at the real cwd to clear.
+    // No folder for a color = no map installed = never colored. See research/2026-10-12-warp-tab-color.md.
     if (process.env.TERM_PROGRAM === 'WarpTerminal' && session && process.platform !== 'win32') {
       try {
-        const color = { 226: 'yellow', 203: 'red', 114: 'green', 80: 'green', 111: 'blue', 141: 'blue', 208: 'magenta' }
-          [PHASE[(focus.match(/^([\p{L}\d&-]+):/u)?.[1] || '').toLowerCase()]];
-        const colorDir = color && path.join(os.homedir(), '.warp', 'tab-colors', color);
+        const TAB = { __proto__: null, blocked: 'red', done: 'green',
+                      research: 'magenta', explore: 'magenta', analysis: 'magenta',
+                      'q&a': 'yellow', chat: 'yellow', 'necesita-revisión': 'yellow', 'necesita-revision': 'yellow',
+                      'needs-review': 'yellow', confirma: 'yellow', revisa: 'yellow' };
+        const label = (focus.match(/^([\p{L}\d&-]+):/u)?.[1] || '').toLowerCase();
+        // The label is written once per turn, so it goes stale both ways: a session that stopped is
+        // not working whatever its label says (blue, magenta → white), and one that is working again
+        // is not waiting on you, blocked or done (yellow, red, green → blue) until the turn ends.
+        // A turn that ended with agents still out is working too, whatever the label promised.
+        // A permission prompt or a question to you is yellow, but not from here: Claude Code does not
+        // run the statusline while a dialog is open, so hooks/tab-wait.js paints it and this repaints.
+        const shells = Object.values(scan.sh).some(t => Date.now() - t < SHELL_MAX);
+        const idle = scan.pid !== me || scan.idle && !(scan.bg > 0 || shells);
+        const busy = label && (TAB[label] || 'blue');
+        const color = !busy ? '' : idle ? (busy === 'blue' || busy === 'magenta' ? 'white' : busy)
+          : busy === 'magenta' ? busy : 'blue';
+        const base = path.join(os.homedir(), '.warp', 'tab-colors');
+        const colorDir = color && path.join(base, color);
         // Not the color folder itself but a mirror of the cwd inside it (the map matches by prefix):
         // Warp opens new tabs and splits in the folder a tab last reported, and a mirror keeps the
-        // real path, which the README's one-line zsh hook cds back to. '' = uncolored: nothing sent.
+        // real path, which the README's one-line zsh hook cds back to. '' = uncolored: the real cwd.
         const want = colorDir && fs.existsSync(colorDir) ? path.join(colorDir, cwd) : '';
         if (want) fs.mkdirSync(want, { recursive: true });
         const colorFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.tabcolor`);
-        // A color is also re-sent each minute: anything else in the tab that reports a cwd (a shell,
-        // a test run, a resumed session) clears it behind the cache's back, and would leave it cleared for good.
+        // Sent on a change, and re-sent each minute while colored: anything else in the tab that
+        // reports a cwd (a shell, a test run) clears it behind the cache's back. The cache is per
+        // session and names the claude process too, so a new session or process sends its state once
+        // whatever it is: the tab may still wear the last one's color (`/clear` starts a new,
+        // unlabeled session), or none (`/exit` + `claude --resume`: the shell cleared it in between).
         let prev = '', age = Infinity;
         try { prev = fs.readFileSync(colorFile, 'utf8'); age = Date.now() - fs.statSync(colorFile).mtimeMs; } catch {}
+        const own = `${me} `, was = prev.slice(prev.indexOf(' ') + 1);
         // Per segment, so a '#' or '?' in a path is not read as a fragment or query.
         const url = (want || cwd).split('/').map(encodeURIComponent).join('/');
-        if ((want !== prev || (want && age > 60000)) && toTty(`\x1b]7;file://${os.hostname()}${url}\x07`)) fs.writeFileSync(colorFile, want);
+        if (fs.existsSync(base) && (want !== was || !prev.startsWith(own) || (want && age > 60000))
+            && toTty(`\x1b]7;file://${os.hostname()}${url}\x07`))
+          fs.writeFileSync(colorFile, own + want);
       } catch {}
     }
     process.stdout.write(`${L1.join(' | ')}\n${L2.join(' | ')}`);

@@ -1,5 +1,5 @@
 {
-  "description": "claude-status-bar: phase-file nudge, stop guard, subagent effort + phase capture",
+  "description": "claude-status-bar: phase-file nudge, stop guard, subagent effort + phase capture, Warp tab yellow on dialogs",
   "hooks": {
     "SessionStart": [
       {
@@ -37,6 +37,16 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-effort.js\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/tab-wait.js\""
           }
         ]
       }

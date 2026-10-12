@@ -64,10 +64,11 @@ const STDIN_JSON = JSON.stringify({
   cost: { total_duration_ms: 600000, total_api_duration_ms: 20000 },
 });
 
-function render(payload = STDIN_JSON) {
+// CLAUDE_PID: the claude process the statusline runs under (Claude Code sets it); another one is a resume
+function render(payload = STDIN_JSON, pid = '4242') {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN], {
-      env: { ...process.env, HOME: home, CCS_TTY: ttyFile },
+      env: { ...process.env, HOME: home, CCS_TTY: ttyFile, CLAUDE_PID: pid },
       cwd: home,
     });
     let out = '';
@@ -543,26 +544,136 @@ async function main() {
   assert.ok(!plainL1.startsWith('#'), `non-UUID session id grew a tag: ${JSON.stringify(plainL1)}`);
   for (const k of ['phase', 'tps']) fs.rmSync(path.join(os.tmpdir(), `ccs-${k}-${UUID}.json`), { force: true });
 
-  // Warp tab color: a phase that wants you points the tab at its color folder (OSC 7), a busy one
-  // back at the cwd; a color is re-sent once its last send is a minute old.
+  // Warp tab color: the tab is pointed (OSC 7) into a color folder's mirror of the cwd. Working is
+  // blue (magenta investigating) whatever the label; once the turn is over the label decides:
+  // yellow waiting, red blocked, green done, white for a working label. Re-sent after a minute.
   const colorFile = path.join(home, '.claude', 'session-context', `${SESSION}.tabcolor`);
-  const yellowDir = path.join(home, '.warp', 'tab-colors', 'yellow');
-  const yellowMirror = path.join(yellowDir, home);  // the cwd mirrored inside the color folder
+  const mirror = c => path.join(home, '.warp', 'tab-colors', c, home);
   const osc7 = dir => `\x1b]7;file://${os.hostname()}${dir.split('/').map(encodeURIComponent).join('/')}\x07`;
   const sent = async () => { fs.writeFileSync(ttyFile, ''); await render(); return fs.readFileSync(ttyFile, 'utf8'); };
+  const turn = { end: '{"type":"system","subtype":"turn_duration","durationMs":1}\n',
+                 prompt: '{"type":"user","message":{"role":"user","content":"go on"}}\n',
+                 esc: '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}\n' };
   const term = process.env.TERM_PROGRAM;
   process.env.TERM_PROGRAM = 'WarpTerminal';
+  fs.appendFileSync(transcript, turn.end);
   setPhase('Necesita-Revisión: pick a color');
-  assert.ok(!(await sent()).includes('tab-colors'), 'tab colored with no color folder installed');
-  fs.mkdirSync(yellowDir, { recursive: true });
-  assert.ok((await sent()).includes(osc7(yellowMirror)), 'needs-review did not point the tab at the cwd mirror in the yellow folder');
-  assert.ok(fs.statSync(yellowMirror).isDirectory(), 'cwd mirror not created');
+  assert.ok(!(await sent()).includes('\x1b]7;'), 'the tab touched with no color folder installed');
+  for (const c of ['yellow', 'blue', 'white', 'magenta']) fs.mkdirSync(path.join(home, '.warp', 'tab-colors', c), { recursive: true });
+  assert.ok((await sent()).includes(osc7(mirror('yellow'))), 'stopped on needs-review: tab not pointed at the cwd mirror in yellow');
+  assert.ok(fs.statSync(mirror('yellow')).isDirectory(), 'cwd mirror not created');
   assert.ok(!(await sent()).includes('\x1b]7;'), 'unchanged color re-sent within the minute');
   fs.utimesSync(colorFile, new Date(Date.now() - 120000), new Date(Date.now() - 120000));
-  assert.ok((await sent()).includes(osc7(yellowMirror)), 'color not re-sent after a minute');
+  assert.ok((await sent()).includes(osc7(mirror('yellow'))), 'color not re-sent after a minute');
+  fs.appendFileSync(transcript, turn.prompt);
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'working again but a stale needs-review kept it yellow');
+  setPhase('Research: pick a color');
+  assert.ok((await sent()).includes(osc7(mirror('magenta'))), 'investigating not magenta');
   setPhase('Exec: pick a color');
-  assert.ok((await sent()).includes(osc7(home)), 'busy phase did not clear the tab color');
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'working phase not blue');
+  fs.appendFileSync(transcript, turn.end);
+  assert.ok((await sent()).includes(osc7(mirror('white'))), 'stopped session not white');
+  fs.appendFileSync(transcript, turn.prompt + turn.esc);
+  assert.ok(!(await sent()).includes('\x1b]7;'), 'interrupted session not white');
+  fs.appendFileSync(transcript, turn.prompt);
+  setPhase('Some-New-Label: pick a color');
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'an unknown label is not counted as work (blue)');
+  setPhase('no label at all');
+  assert.ok((await sent()).includes(osc7(home)), 'a focus with no phase did not clear the tab color');
   assert.ok(!(await sent()).includes('\x1b]7;'), 'uncolored tab re-sent its cwd');
+
+  // Turn-state edge cases, each one seen in real transcripts. `shown` is the color last sent.
+  const shown = () => fs.readFileSync(colorFile, 'utf8').split(' ').slice(1).join(' ');
+  const rec = (type, content, extra = {}) => JSON.stringify({ type, ...extra, message: { role: type, content } }) + '\n';
+  setPhase('Exec: pick a color');
+  fs.appendFileSync(transcript, turn.end);
+  assert.ok((await sent()).includes(osc7(mirror('white'))), 'stopped session not white');
+  // what never reaches the model: a local slash command and its output, `!` shell mode, a /compact summary
+  fs.appendFileSync(transcript, rec('user', '<command-name>/model</command-name>\n<command-message>model</command-message>')
+    + rec('user', '<local-command-stdout>Set model to haiku</local-command-stdout>') + rec('user', '<bash-input>ls</bash-input>')
+    + rec('user', 'This session is being continued from a previous conversation…', { isCompactSummary: true }));
+  await sent();
+  assert.strictEqual(shown(), mirror('white'), 'a local command or a compaction summary counted as work');
+  // the interrupt marker quoted in a tool result or by the model is not an Esc
+  fs.appendFileSync(transcript, rec('user', '<command-message>opsx:apply</command-message>\n<command-name>/opsx:apply</command-name>'));
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'a slash command that prompts the model not counted as work');
+  fs.appendFileSync(transcript, rec('user', [{ type: 'tool_result', tool_use_id: 't1', content: 'x [Request interrupted by user] y' }]));
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'an interrupt marker quoted in a tool result stopped the session');
+  fs.appendFileSync(transcript, rec('assistant', [{ type: 'text', text: 'An Esc leaves "[Request interrupted by user]".' }]));
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'an interrupt marker quoted by the model stopped the session');
+  // a turn that ends with background agents out is still working, whatever the label promises
+  setPhase('Needs-Review: pick a color');
+  fs.appendFileSync(transcript, '{"type":"system","subtype":"turn_duration","durationMs":1,"pendingBackgroundAgentCount":1}\n');
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'background agents pending: not blue');
+  // …but only for the process that launched them: a resumed session inherits none, nor a turn
+  // the last process died in the middle of
+  await render(STDIN_JSON, '4343');
+  assert.strictEqual(shown(), mirror('yellow'), 'a resumed session inherited the background agents of the last process');
+  fs.appendFileSync(transcript, turn.prompt);
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'a prompt did not count as work');
+  await render(STDIN_JSON, '4343');
+  assert.strictEqual(shown(), mirror('yellow'), 'a resumed session inherited the turn the last process died in');
+  fs.appendFileSync(transcript, turn.end.replace('}', ',"pendingBackgroundAgentCount":1}'));
+  // and never past the next turn: an Esc'd one writes no turn_duration to reset the count
+  fs.appendFileSync(transcript, turn.prompt + turn.esc);
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'an Esc after a turn with background agents still read as working');
+  // an agent's hand-back wakes the model with no prompt of yours (isMeta): its first output is work
+  fs.appendFileSync(transcript, rec('user', '<agent-message from="a1">[Subagent hand-back] …', { isMeta: true }));
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'harness input that may never reach the model counted as work');
+  fs.appendFileSync(transcript, rec('assistant', [{ type: 'thinking', thinking: '' }]));
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'the model woken by a hand-back not counted as work');
+  // A dialog is painted yellow by hooks/tab-wait.js, which records it here; once it closes and the
+  // statusline runs again, the transcript's state is sent even though the statusline itself did not change.
+  fs.appendFileSync(transcript, turn.prompt);
+  await sent();
+  fs.writeFileSync(colorFile, `4242 ${mirror('yellow')}`);
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'the tab stayed yellow after the dialog closed');
+  // a new claude process (resume in a tab whose shell cleared the color) re-sends an unchanged color
+  fs.writeFileSync(colorFile, `1 ${mirror('blue')}`);
+  assert.ok((await sent()).includes(osc7(mirror('blue'))), 'a new claude process did not re-send the color');
+  // background shells: pending from launch to the <task-notification> naming its tool use, except servers
+  const bash = (id, description, command, at = new Date().toISOString()) => JSON.stringify({ type: 'assistant', timestamp: at,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command, description, run_in_background: true } }] } }) + '\n';
+  fs.appendFileSync(transcript, bash('toolu_job', 'Run the test suite', 'npx vitest run') + turn.end);
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'a background test run pending at the turn end: not blue');
+  fs.appendFileSync(transcript, JSON.stringify({ type: 'queue-operation', operation: 'enqueue',
+    content: '<task-notification>\n<task-id>b1</task-id>\n<tool-use-id>toolu_job</tool-use-id>\n<status>completed</status>' }) + '\n');
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'a finished background shell still read as working');
+  fs.appendFileSync(transcript, turn.prompt + bash('toolu_srv', 'Start vite dev server', 'npx vite --port 5173') + turn.end);
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'a background dev server read as working');
+  fs.appendFileSync(transcript, turn.prompt + bash('toolu_old', 'Run the test suite', 'npx jest', new Date(Date.now() - 20 * 60000).toISOString()) + turn.end);
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'a background shell past the cap still read as working');
+  fs.appendFileSync(transcript, turn.prompt + bash('toolu_no', 'Run the test suite', 'npx jest')
+    + rec('user', [{ type: 'tool_result', tool_use_id: 'toolu_no', is_error: true, content: "The user doesn't want to proceed" }]) + turn.esc);
+  await sent();
+  assert.strictEqual(shown(), mirror('yellow'), 'a denied background shell read as working');
+  // a resumed session's first turn: the last process's shells died with it
+  fs.appendFileSync(transcript, turn.prompt + bash('toolu_dead', 'Run the test suite', 'npx jest') + turn.end);
+  await sent();
+  assert.strictEqual(shown(), mirror('blue'), 'a background test run pending at the turn end: not blue (2)');
+  fs.appendFileSync(transcript, turn.prompt + turn.end);
+  await render(STDIN_JSON, '4343');
+  assert.strictEqual(shown(), mirror('yellow'), "a resumed session counted the last process's background shells");
+  // `/clear` starts a new session, unlabeled: it must clear the color the old one left on the tab, once
+  const cleared = { ...JSON.parse(STDIN_JSON), session_id: `sess-cleared-${Date.now()}` };
+  fs.writeFileSync(ttyFile, '');
+  await render(cleared);
+  assert.ok(fs.readFileSync(ttyFile, 'utf8').includes(osc7(home)), "a new session left the last one's color on the tab");
+  fs.writeFileSync(ttyFile, '');
+  await render(cleared);
+  assert.strictEqual(fs.readFileSync(ttyFile, 'utf8'), '', 'an uncolored session re-sent its cwd');
+  fs.rmSync(path.join(os.tmpdir(), `ccs-tps-${cleared.session_id}.json`), { force: true });
   delete process.env.TERM_PROGRAM;
   setPhase('Needs-Review: pick a color');
   assert.ok(!(await sent()).includes('\x1b]7;'), 'tab colored outside Warp');
