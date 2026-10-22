@@ -9,6 +9,12 @@ const os = require('os');
 const { execSync } = require('child_process');
 const scoreFor = require('./intelligence');
 
+// The phase file as text: FF FE = UTF-16LE BOM (PowerShell 5.1 `>`), else UTF-8.
+const readPhase = file => {
+  const buf = fs.readFileSync(file);
+  return buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8');
+};
+
 let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', c => input += c);
@@ -180,6 +186,8 @@ process.stdin.on('end', () => {
     const activate = pend => {
       try {
         if (fs.statSync(focusFile).mtimeMs >= pend.at) return true;
+        // An activity line means a live writer (lookout) owns the file and tracks the phase itself.
+        if (/\n\s*\S/.test(readPhase(focusFile).trim())) return true;
       } catch {}                                     // no phase file yet — this is the first label
       try {
         fs.mkdirSync(path.dirname(focusFile), { recursive: true });
@@ -361,15 +369,24 @@ process.stdin.on('end', () => {
       return st;
     })();
 
+    // What each activity reads as, and the activity each kind already stands for (lookout's KIND_ACTIVITY).
+    const DOING = { think: 'reads', work: 'edits', check: 'tests', wait: 'asks' };
+    const KIND_ACTIVITY = { research: 'think', explore: 'think', analysis: 'think', plan: 'think', planification: 'think',
+                            'review-plan': 'think', review: 'think', 'q&a': 'think', critique: 'think', chat: 'think', focus: 'think',
+                            design: 'think', investigate: 'think', audit: 'think', explain: 'think', answer: 'think', recon: 'think',
+                            summary: 'think', exec: 'work', build: 'work', fix: 'work', debug: 'work', docs: 'work',
+                            implement: 'work', refactor: 'work', migrate: 'work', deploy: 'work', setup: 'work', cleanup: 'work',
+                            verify: 'check', 'review-execution': 'check', test: 'check', 'needs-review': 'wait' };
     // Read after the scan: activating Planification above is what this render then displays.
-    const focus = (() => {
-      if (!focusFile) return '';
+    // Line 1 is the label. A live writer (lookout) adds line 2: what the latest tool call did.
+    const [focus, activity] = (() => {
+      if (!focusFile) return ['', ''];
       try {
-        const buf = fs.readFileSync(focusFile);
-        // FF FE = UTF-16LE BOM (PowerShell 5.1 `>`); trailing quotes = cmd.exe `echo "…"`
-        return (buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8'))
-          .trim().split('\n')[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1');
-      } catch { return ''; }
+        // trailing quotes = cmd.exe `echo "…"`
+        const lines = readPhase(focusFile).trim().split('\n');
+        const act = (lines[1] ?? '').trim();
+        return [lines[0].replace(/[\x00-\x1f\x7f]/g, '').replace(/^"(.*)"$/, '$1'), DOING[act] ? act : ''];
+      } catch { return ['', '']; }
     })();
     // semantic palette: blue=think, gold=working, orange=question, cyan=check, green=done, red=trouble, yellow=waiting on user
     const PHASE = { research: 176, explore: 176, analysis: 176, plan: 111, planification: 111, 'review-plan': 141, exec: 220,
@@ -405,7 +422,9 @@ process.stdin.on('end', () => {
         const mins = Math.round((Date.now() - since) / 60000);
         const style = `\x1b[${mins >= 90 ? 2 : 1};${c === 226 ? '7;' : ''}38;5;${c}m`; // 226 = waiting on the user: a chip you can spot from another tab
         const age = mins >= 20 ? ` ${dur(mins)}` : '';
-        return `${style}${m[1]}\x1b[0;38;5;245m${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age
+        // The phase holds through a read inside a build; the activity says what this very call does, when it differs.
+        const doing = activity && KIND_ACTIVITY[m[1].toLowerCase()] !== activity ? `·${DOING[activity]}` : '';
+        return `${style}${m[1]}\x1b[0;38;5;245m${doing}${age}:\x1b[0m ${m[2]}`; // 0; first: the chip's reverse-video must not bleed onto the age
 
       } catch { return ''; }
     })();
@@ -694,7 +713,8 @@ process.stdin.on('end', () => {
         // Re-sent when the title changes or the phase file was touched since the last send: Warp
         // drops program titles on a hand-renamed tab, so "update your phase" is also the refresh.
         let prev = '', stale = false;
-        try { prev = fs.readFileSync(titleFile, 'utf8'); stale = fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
+        // A live writer rewrites the file on every call, so its mtime says nothing about the title.
+        try { prev = fs.readFileSync(titleFile, 'utf8'); stale = !activity && fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
         if ((title !== prev || stale) && toTty(`\x1b]0;${title}\x07`)) fs.writeFileSync(titleFile, title);
       } catch {}
     }

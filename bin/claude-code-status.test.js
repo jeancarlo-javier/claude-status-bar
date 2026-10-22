@@ -130,6 +130,15 @@ async function main() {
   // waiting on the user is the one state that has to carry across tabs: reverse-video chip
   setPhase('Needs-Review: approve the plan');
   assert.ok((await render()).startsWith('\x1b[1;7;38;5;226mNeeds-Review'), 'Needs-Review is not rendered as a chip');
+
+  // a live writer's line 2 is what the latest call did: shown only when it is not what the phase already says
+  const lead = async () => (await render()).replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
+  setPhase('Exec: Compact the status bar\ncheck');
+  assert.ok((await lead()).startsWith('Exec·tests: Compact the status bar'), `activity not shown: ${JSON.stringify(await lead())}`);
+  setPhase('Exec: Compact the status bar\nwork');
+  assert.ok((await lead()).startsWith('Exec: Compact the status bar'), `activity shown though the phase says it: ${JSON.stringify(await lead())}`);
+  setPhase('Exec: Compact the status bar\n\x1b[31mrm -rf');
+  assert.ok((await lead()).startsWith('Exec: Compact the status bar'), `an unknown line 2 was shown: ${JSON.stringify(await lead())}`);
   setPhase('Exec: Compact the status bar');
 
   // model display name is stripped of its parenthetical ("Opus 5 (1M context)" -> "Opus 5")
@@ -465,6 +474,20 @@ async function main() {
   fs.chmodSync(planFile, 0o644);
   await planRender();
   assert.equal(planPhase(), 'Planification: retried-change', `a failed activation was not retried: ${JSON.stringify(planPhase())}`);
+
+  // a live writer (an activity line) owns the file: the bar does not second-guess it with a Planification
+  setManual('Plan: gate the PR flow\nthink', 30);
+  planSay(propose(), bashUse('openspec new change owned-change'));
+  await planRender();
+  assert.equal(planPhase(), 'Plan: gate the PR flow\nthink', `the bar overwrote a live writer's file: ${JSON.stringify(planPhase())}`);
+
+  // a one-line label PowerShell wrote as UTF-16 has no activity line: Planification still lands
+  fs.writeFileSync(planFile, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Exec: build the thing\r\n', 'utf16le')]));
+  const past = new Date(Date.now() - 30 * 60000);
+  fs.utimesSync(planFile, past, past);
+  planSay(propose(), bashUse('openspec new change utf16-change'));
+  await planRender();
+  assert.equal(planPhase(), 'Planification: utf16-change', `a UTF-16 one-liner read as a live writer: ${JSON.stringify(planPhase())}`);
 
 
   // per-effort intelligence score from data/intelligence.json: e.g. "Claude Opus 5.5 [med·51]"
