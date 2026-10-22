@@ -137,6 +137,10 @@ async function main() {
   assert.ok((await lead()).startsWith('Exec·tests: Compact the status bar'), `activity not shown: ${JSON.stringify(await lead())}`);
   setPhase('Exec: Compact the status bar\nwork');
   assert.ok((await lead()).startsWith('Exec: Compact the status bar'), `activity shown though the phase says it: ${JSON.stringify(await lead())}`);
+  setPhase('Plan: edge cases\nagents');
+  assert.ok((await lead()).startsWith('Plan·agents: edge cases'), `background agents not shown: ${JSON.stringify(await lead())}`);
+  setPhase('Exec: Compact the status bar\njobs');
+  assert.ok((await lead()).startsWith('Exec·jobs: Compact the status bar'), `background jobs not shown: ${JSON.stringify(await lead())}`);
   setPhase('Exec: Compact the status bar\n\x1b[31mrm -rf');
   assert.ok((await lead()).startsWith('Exec: Compact the status bar'), `an unknown line 2 was shown: ${JSON.stringify(await lead())}`);
   setPhase('Exec: Compact the status bar');

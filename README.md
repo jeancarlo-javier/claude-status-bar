@@ -38,8 +38,10 @@ shared across all Claude config dirs (the scripts always resolve `~/.claude/` re
 
 The file can instead be kept by a mod that watches every tool call, such as the lookout session
 log: line 1 stays `Kind: subject`, and line 2
-is what the latest call did — `think`, `work`, `check`, `wait` or `idle`. The bar shows it after the
-kind, dimmed, only when it differs from what the kind already says (`Exec·tests: writer tests`).
+is what the latest call did — `think`, `work`, `check`, `wait` or `idle` — or, when the turn ended with
+its own work still running, `agents` (subagents, workflows) or `jobs` (background commands). The bar
+shows it after the kind, dimmed, only when it differs from what the kind already says
+(`Exec·tests: writer tests`, `Plan·agents: edge cases`).
 An activity line marks the file as owned, so the bar does not write `Planification:` over it. With
 a live writer, leave the nudge and guard hooks unwired: they ask the model to `echo` over the file.
 

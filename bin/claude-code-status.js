@@ -370,7 +370,8 @@ process.stdin.on('end', () => {
     })();
 
     // What each activity reads as, and the activity each kind already stands for (lookout's KIND_ACTIVITY).
-    const DOING = { think: 'reads', work: 'edits', check: 'tests', wait: 'asks' };
+    // agents/jobs: the turn ended while its own subagents/workflows or background commands still run.
+    const DOING = { think: 'reads', work: 'edits', check: 'tests', wait: 'asks', agents: 'agents', jobs: 'jobs' };
     const KIND_ACTIVITY = { research: 'think', explore: 'think', analysis: 'think', plan: 'think', planification: 'think',
                             'review-plan': 'think', review: 'think', 'q&a': 'think', critique: 'think', chat: 'think', focus: 'think',
                             design: 'think', investigate: 'think', audit: 'think', explain: 'think', answer: 'think', recon: 'think',
