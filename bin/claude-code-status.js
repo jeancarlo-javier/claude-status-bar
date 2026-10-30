@@ -221,7 +221,7 @@ process.stdin.on('end', () => {
       // arithmetic can never be corrected incrementally — it has to be recounted from zero, and
       // nothing in its numbers reveals which rule produced them. That is how a mid-session change
       // once left a 517k session reading 1.1k forever.
-      const st = { v: 7, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [], arm: false, pend: null, idle: false, bg: 0, pid: '', sh: {} };
+      const st = { v: 8, off: 0, sum: 0, total: 0, last: '', hist: [], pro: '', dirs: [], arm: false, pend: null, idle: false, bg: 0, pid: '', sh: {} };
       if (!d.transcript_path) return st;
       try {
         // The transcript is append-only and reaches tens of MB, so re-reading all of it every few
@@ -300,8 +300,10 @@ process.stdin.on('end', () => {
             }
             if (line.includes('<task-notification>')) for (const m of line.matchAll(/<tool-use-id>(\w+)</g)) delete st.sh[m[1]];
             // isMeta is the harness talking to the model (hook output, reminders); isSidechain is a
-            // subagent. Neither one is you choosing a change to work on.
-            if (o.isMeta || o.isSidechain || !o.message) continue;
+            // subagent. Neither one is you choosing a change to work on. Nor is any other record type:
+            // 2.1.314's `api-request-blob` copies the injected context under role "user", and its
+            // `git status` lists every untracked change — which pinned one to every session.
+            if (o.isMeta || o.isSidechain || !o.message || (o.type !== 'user' && o.type !== 'assistant')) continue;
             const c = o.message.content;
             const blocks = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : [];
             // Deliberate inputs only. A tool_result is command *output* — that is where a listing of

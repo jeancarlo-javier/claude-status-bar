@@ -323,6 +323,10 @@ async function main() {
   say(userMsg('/opsx:apply blocked-change', ',"isMeta":true'));
   assert.equal(await chgSeg(), 'fresh-change', 'a sidechain or meta record moved the pin');
 
+  // a request blob carries the injected git status, untracked changes and all — context, not a choice
+  say(userMsg('Status:\n?? openspec/changes/blocked-change/').replace('{"type":"user"', '{"type":"api-request-blob"'));
+  assert.equal(await chgSeg(), 'fresh-change', 'an api-request-blob moved the pin');
+
   // one line, two blocks: skipping the whole line because it holds a tool_result would lose the ask
   say(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"noise"},{"type":"text","text":"/opsx:apply blocked-change"}]}}`);
   assert.equal(await chgSeg(), 'blocked-change', 'text block alongside a tool_result was dropped');
