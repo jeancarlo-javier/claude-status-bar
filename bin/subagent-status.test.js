@@ -8,20 +8,20 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const FIXTURE = path.join(__dirname, 'intelligence.fixture.json');
 const BIN = path.join(__dirname, 'subagent-status.js');
 const HOOK = path.join(__dirname, '..', 'hooks', 'subagent-effort.js');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sas-test-'));
 const home = path.join(tmp, 'home');
 const ctx = path.join(home, '.claude', 'session-context');
-// scores come from the committed data/intelligence.json snapshot; expectations read it, so a refresh doesn't break them
-const M = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models;
+const M = JSON.parse(fs.readFileSync(FIXTURE, 'utf8')).models;
 const sc = (k, e) => Math.round(M[k][e]);
 const SESSION = 'sess-rows';
 
 const run = (bin, payload) => spawnSync(process.execPath, [bin], {
   input: typeof payload === 'string' ? payload : JSON.stringify(payload),
   encoding: 'utf8',
-  env: { ...process.env, HOME: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+  env: { ...process.env, CCS_INTELLIGENCE: FIXTURE, HOME: home, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
 }).stdout;
 const rows = payload => run(BIN, payload).trim().split('\n').filter(Boolean).map(JSON.parse);
 const plain = s => s.replace(/\x1b\[[0-9;]*m/g, '');

@@ -8,7 +8,7 @@ const path = require('path');
 module.exports = function scoreFor(effort, ...names) {
   if (effort === 'med') effort = 'medium';
   let models;
-  try { models = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models; } catch { return null; }
+  try { models = JSON.parse(fs.readFileSync(process.env.CCS_INTELLIGENCE || path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models; } catch { return null; }
   // "claude-opus-5-5" / "Claude Opus 5.5" / "claude-haiku-4-5-20251001" -> opus-5.5 / haiku-4.5
   const hit = names.map(v => (v || '').match(/(opus|sonnet|haiku|fable)[- ](\d+)(?:[-.](\d{1,2})(?!\d))?/i)).find(Boolean);
   const e = hit && models[`${hit[1].toLowerCase()}-${hit[2]}${hit[3] ? '.' + hit[3] : ''}`];

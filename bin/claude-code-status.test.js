@@ -12,6 +12,7 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ccs-test-'));
 fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
 process.env.HOME = home;
 
+const FIXTURE = path.join(__dirname, 'intelligence.fixture.json');
 const BIN = path.join(__dirname, 'claude-code-status.js');
 // stands in for the claude process's tty: tab titles and colors land here, not in the terminal running the tests
 const ttyFile = path.join(home, 'tty');
@@ -68,7 +69,7 @@ const STDIN_JSON = JSON.stringify({
 function render(payload = STDIN_JSON, pid = '4242') {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN], {
-      env: { ...process.env, HOME: home, CCS_TTY: ttyFile, CLAUDE_PID: pid },
+      env: { ...process.env, CCS_INTELLIGENCE: FIXTURE, HOME: home, CCS_TTY: ttyFile, CLAUDE_PID: pid },
       cwd: home,
     });
     let out = '';
@@ -498,8 +499,8 @@ async function main() {
   assert.equal(planPhase(), 'Planification: utf16-change', `a UTF-16 one-liner read as a live writer: ${JSON.stringify(planPhase())}`);
 
 
-  // per-effort intelligence score from data/intelligence.json: e.g. "Claude Opus 5.5 [med·51]"
-  const M = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'intelligence.json'), 'utf8')).models;
+  // per-effort intelligence score: e.g. "Claude Opus 5.5 [med·51]"
+  const M = JSON.parse(fs.readFileSync(FIXTURE, 'utf8')).models;
   const sc = (k, e) => Math.round(M[k][e]);
   const strip = s => s.replace(/\x1b\[[0-9;]*m/g, '').split('\n')[0];
   const withModel = (id, name, effort) => render({ ...JSON.parse(STDIN_JSON), model: { id, display_name: name }, effort });

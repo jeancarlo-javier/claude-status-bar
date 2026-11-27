@@ -1,0 +1,11 @@
+{
+ "source": "test fixture: fixed scores so a data refresh cannot break the tests",
+ "models": {
+  "haiku-4.5": { "*": 7.4 },
+  "opus-4.6": { "max": 46.5 },
+  "opus-5": { "low": 30.2, "high": 40.6, "xhigh": 43.1, "max": 44.2 },
+  "opus-5.5": { "low": 34.5, "medium": 48.1, "high": 51.7, "xhigh": 57, "max": 58.4 },
+  "sonnet-5": { "medium": 33.4, "max": 42.8 },
+  "sonnet-5.5": { "low": 25.3, "medium": 41.2, "high": 45.1, "xhigh": 49.6, "max": 54.2 }
+ }
+}
