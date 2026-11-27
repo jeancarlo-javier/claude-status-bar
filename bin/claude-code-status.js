@@ -629,6 +629,15 @@ process.stdin.on('end', () => {
     }
 
     const modelIndicator = tag ? `${model} ${tag}` : model;
+    if (session) {
+      try {
+        const modelFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.model`);
+        const plain = effortShort ? `${model}-${effortShort}` : model;
+        let was = '';
+        try { was = fs.readFileSync(modelFile, 'utf8'); } catch {}
+        if (was !== plain) fs.writeFileSync(modelFile, plain);
+      } catch {}
+    }
 
     const dir = path.basename(cwd);
     const L1 = [modelIndicator, branch ? `${dir}\x1b[38;5;245m@\x1b[0m${branch}` : dir];
