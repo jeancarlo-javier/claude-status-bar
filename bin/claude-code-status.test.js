@@ -576,6 +576,26 @@ async function main() {
   assert.ok(!plainL1.startsWith('#'), `non-UUID session id grew a tag: ${JSON.stringify(plainL1)}`);
   for (const k of ['phase', 'tps']) fs.rmSync(path.join(os.tmpdir(), `ccs-${k}-${UUID}.json`), { force: true });
 
+  const titleFile = path.join(home, '.claude', 'session-context', `${SESSION}.title`);
+  const titled = async (pid = '4242') => {
+    fs.writeFileSync(ttyFile, '');
+    await render(STDIN_JSON, pid);
+    return fs.readFileSync(ttyFile, 'utf8').includes('\x1b]0;');
+  };
+  const ownTitle = process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE;
+  process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = '1';
+  setPhase('Exec: title the tab', 5);
+  fs.rmSync(titleFile, { force: true });
+  assert.ok(await titled(), 'a new tab title was not sent');
+  assert.ok(fs.readFileSync(ttyFile, 'utf8').includes(`\x1b]0;${fs.readFileSync(titleFile, 'utf8')}\x07`), 'the sent title was not recorded for the deck');
+  assert.ok(!(await titled()), 'an unchanged tab title was re-sent within the minute');
+  assert.ok(await titled('4343'), 'a resumed session (new claude process, new tab) did not re-send its unchanged title');
+  assert.ok(!(await titled('4343')), 'the resumed process re-sent its title within the minute');
+  const minutesAgo = new Date(Date.now() - 120000);
+  fs.utimesSync(titleFile, minutesAgo, minutesAgo);
+  assert.ok(await titled('4343'), 'an unchanged tab title was not re-sent after a minute');
+  if (ownTitle === undefined) delete process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE; else process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE = ownTitle;
+
   // Warp tab color: the tab is pointed (OSC 7) into a color folder's mirror of the cwd. Working is
   // blue (magenta investigating) whatever the label; once the turn is over the label decides:
   // yellow waiting, red blocked, green done, white for a working label. Re-sent after a minute.

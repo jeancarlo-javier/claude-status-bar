@@ -722,12 +722,18 @@ process.stdin.on('end', () => {
         // ponytail: 18 fits a Warp tab with ~7 open; raise if it looks clipped with fewer
         const title = `${sym ? `${sym} ` : ''}${trunc(subject, 18)}`;
         const titleFile = path.join(os.homedir(), '.claude', 'session-context', `${session}.title`);
-        // Re-sent when the title changes or the phase file was touched since the last send: Warp
-        // drops program titles on a hand-renamed tab, so "update your phase" is also the refresh.
-        let prev = '', stale = false;
+        // Re-sent when the title changes, the phase file was touched since the last send, another
+        // claude process runs the session (a resume opens a new tab) or a minute passed: Warp drops
+        // program titles on a hand-renamed tab, and the deck finds a session by its tab title.
+        const pidFile = `${titleFile}pid`;
+        let prev = '', stale = false, age = Infinity, sentBy = '';
         // A live writer rewrites the file on every call, so its mtime says nothing about the title.
-        try { prev = fs.readFileSync(titleFile, 'utf8'); stale = !activity && fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
-        if ((title !== prev || stale) && toTty(`\x1b]0;${title}\x07`)) fs.writeFileSync(titleFile, title);
+        try { prev = fs.readFileSync(titleFile, 'utf8'); age = Date.now() - fs.statSync(titleFile).mtimeMs; stale = !activity && fs.statSync(focusFile).mtimeMs > fs.statSync(titleFile).mtimeMs; } catch {}
+        try { sentBy = fs.readFileSync(pidFile, 'utf8'); } catch {}
+        if ((title !== prev || stale || sentBy !== me || age > 60000) && toTty(`\x1b]0;${title}\x07`)) {
+          fs.writeFileSync(titleFile, title);
+          fs.writeFileSync(pidFile, me);
+        }
       } catch {}
     }
 
